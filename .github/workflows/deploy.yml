@@ -54,7 +54,4 @@ jobs:
             sudo docker rm ${{ vars.SERVICE_NAME }} || true
             sudo docker system prune -f
 
-            sudo docker run -d --name ${{ vars.SERVICE_NAME }} \
-              --env-file ${{ secrets.ENV_PATH }} \
-              -p ${{ vars.SERVICE_PORT }}:${{ vars.SERVICE_PORT }} \
-              ${{ secrets.DOCKER_USERNAME }}/${{ vars.SERVICE_NAME }}:latest
+            sudo docker run -d --name ${{ vars.SERVICE_NAME }} --env-file ${{ secrets.ENV_PATH }} -p ${{ vars.SERVICE_PORT }}:${{ vars.SERVICE_PORT }} ${{ secrets.DOCKER_USERNAME }}/${{ vars.SERVICE_NAME }}:latest
