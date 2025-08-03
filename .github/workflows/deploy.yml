@@ -56,4 +56,5 @@ jobs:
 
             sudo docker run -d --name ${{ vars.SERVICE_NAME }} \
               --env-file ${{ secrets.ENV_PATH }} \
-              -p ${{ vars.SERVICE_PORT }}:${{ vars.SERVICE_PORT }} ${{ secrets.DOCKER_USERNAME }}/${{ vars.SERVICE_NAME }}:latest
+              -p ${{ vars.SERVICE_PORT }}:${{ vars.SERVICE_PORT }} \
+              ${{ secrets.DOCKER_USERNAME }}/${{ vars.SERVICE_NAME }}:latest
