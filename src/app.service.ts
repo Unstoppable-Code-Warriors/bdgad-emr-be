@@ -6,7 +6,7 @@ export class AppService {
   constructor(private readonly clickHouseService: ClickHouseService) {}
 
   getHello(): string {
-    return 'Hello World!';
+    return 'Hello From EMR Backend!';
   }
 
   async getClickHouseVersion() {
