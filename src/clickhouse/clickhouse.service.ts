@@ -20,7 +20,7 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
     const database = this.configService.get<string>('CLICKHOUSE_DATABASE');
 
     this.client = createClient({
-      host: `${protocol}://${host}:${port}`,
+      url: `${protocol}://${host}:${port}`,
       username: username,
       password: password,
       database: database,
