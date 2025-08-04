@@ -7,7 +7,11 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
   // cors
   app.enableCors({
-    origin: '*',
+    origin: [
+      /^http:\/\/localhost(:\d+)?$/,
+      /^https?:\/\/.*\.bdgad\.bio$/,
+      /^https?:\/\/bdgad\.bio$/,
+    ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     allowedHeaders: 'Content-Type, Authorization',
   });
