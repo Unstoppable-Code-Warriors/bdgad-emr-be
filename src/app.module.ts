@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { ClickHouseModule } from './clickhouse/clickhouse.module';
 import { envValidationSchema } from './config/env.validation';
 import { AuthModule } from './auth/auth.module';
 import { PatientController } from './patient/patient.controller';
+import { PatientModule } from './patient/patient.module';
 
 @Module({
   imports: [
@@ -19,8 +19,8 @@ import { PatientController } from './patient/patient.controller';
     }),
     ClickHouseModule,
     AuthModule,
+    PatientModule,
   ],
   controllers: [AppController, PatientController],
-  providers: [AppService],
 })
 export class AppModule {}

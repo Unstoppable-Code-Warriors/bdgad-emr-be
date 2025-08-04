@@ -1,30 +1,19 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
-import { AuthGuard } from '../auth/guards/auth.guard';
-import { User } from '../auth/decorators/user.decorator';
-import { UserInfo } from '../auth/interfaces/user-info.interface';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { PatientService } from './patient.service';
+import { AuthGuard } from 'src/auth/guards/auth.guard';
 
-@Controller('patients')
+@Controller('patient')
 @UseGuards(AuthGuard)
 export class PatientController {
+  constructor(private readonly patientService: PatientService) {}
+
   @Get()
-  getPatient(@User() user: UserInfo) {
-    return {
-      message: 'Patient data retrieved successfully',
-      user: user,
-      // Add your patient logic here
-    };
+  findAll() {
+    return this.patientService.findAll();
   }
 
-  @Get('profile')
-  getUserProfile(@User() user: UserInfo) {
-    return {
-      message: 'User profile retrieved',
-      profile: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        roles: user.roles,
-      },
-    };
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.patientService.findOne(+id);
   }
 }
