@@ -40,6 +40,33 @@ export class PatientController {
     });
   }
 
+  @Get('date')
+  getPatientDateCounts(
+    @User() user: UserInfo,
+    @Query('type') type: 'day' | 'month' | 'year' = 'month',
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '20',
+  ) {
+    console.log(
+      '🔍 [PatientController] getPatientDateCounts called by user:',
+      user.id,
+    );
+    console.log('🔍 [PatientController] Date query params:', {
+      type,
+      page,
+      limit,
+    });
+
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+
+    return this.patientService.getPatientDateCounts(user.id, {
+      type,
+      page: pageNum,
+      limit: limitNum,
+    });
+  }
+
   @Get(':id')
   getPatientById(@User() user: UserInfo, @Param('id') id: string) {
     console.log(

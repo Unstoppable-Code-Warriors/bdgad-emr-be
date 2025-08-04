@@ -8,6 +8,8 @@ import {
   GetPatientsQueryDto,
   PaginatedPatientsDto,
   PatientDetailDto,
+  GetPatientDateCountsQueryDto,
+  PaginatedPatientDateCountsDto,
 } from './dto/patient.dto';
 
 @Injectable()
@@ -69,15 +71,8 @@ export class PatientService {
         LIMIT 50000
       ) subquery
     `;
-    console.log('🔍 [PatientService] Executing count query:', countQuery);
-    console.log('🔍 [PatientService] With params:', params);
     const countResult = await this.clickhouseService.query(countQuery, params);
     const total = Number((countResult?.data?.[0] as any)?.total) || 0;
-
-    console.log('📊 [PatientService] Count query result:', {
-      total,
-      countResultType: typeof countResult,
-    });
 
     // Get paginated data with optimized query
     const dataQuery = `
@@ -97,21 +92,6 @@ export class PatientService {
     params.limit = limit;
     params.offset = offset;
 
-    console.log(
-      '🔍 [PatientService] Executing optimized patient query for doctor:',
-      doctorId,
-    );
-    console.log('🔍 [PatientService] Query params:', {
-      page,
-      limit,
-      search,
-      gender,
-      sortBy,
-      sortOrder,
-    });
-
-    console.log('🔍 [PatientService] Executing data query:', dataQuery);
-    console.log('🔍 [PatientService] With params:', params);
     const patientsResult = await this.clickhouseService.query(
       dataQuery,
       params,
@@ -119,18 +99,6 @@ export class PatientService {
     const patientsArray = Array.isArray(patientsResult?.data)
       ? patientsResult.data
       : [];
-
-    console.log('✅ [PatientService] Query executed successfully. Results:', {
-      rawPatientsType: typeof patientsResult,
-      hasDataProperty: 'data' in (patientsResult || {}),
-      dataType: typeof patientsResult?.data,
-      isDataArray: Array.isArray(patientsResult?.data),
-      patientsArrayLength: patientsArray.length,
-      firstPatient:
-        patientsArray.length > 0
-          ? (patientsArray[0] as ClickHousePatientResult)
-          : 'No patients found',
-    });
 
     return {
       data: patientsArray.map((patient: ClickHousePatientResult) => ({
@@ -253,6 +221,118 @@ export class PatientService {
         DateReceived: String(test.DateReceived),
         TestCategory: String(test.TestCategory),
       })),
+    };
+  }
+
+  async getPatientDateCounts(
+    doctorId: number,
+    query: GetPatientDateCountsQueryDto,
+  ): Promise<PaginatedPatientDateCountsDto> {
+    const { type, page, limit } = query;
+    const offset = (page - 1) * limit;
+
+    // Define date format and grouping based on type
+    let dateFormat: string;
+
+    switch (type) {
+      case 'day':
+        dateFormat = '%Y-%m-%d';
+        break;
+      case 'month':
+        dateFormat = '%Y-%m';
+        break;
+      case 'year':
+        dateFormat = '%Y';
+        break;
+      default:
+        throw new Error('Invalid date type');
+    }
+
+    // Count total distinct periods
+    const countQuery = `
+      SELECT COUNT(DISTINCT formatDateTime(f.DateReceived, {dateFormat:String})) as total
+      FROM FactGeneticTestResult f
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      WHERE pr.DoctorId = {doctorId:UInt32}
+        AND f.DateReceived IS NOT NULL
+    `;
+
+    const countResult = await this.clickhouseService.query(countQuery, {
+      doctorId,
+      dateFormat,
+    });
+    const total = Number((countResult?.data?.[0] as any)?.total) || 0;
+
+    // Get paginated date counts
+    const dataQuery = `
+      SELECT 
+        formatDateTime(f.DateReceived, {dateFormat:String}) as date_period,
+        COUNT(DISTINCT f.PatientKey) as patient_count,
+        MIN(f.DateReceived) as period_start,
+        MAX(f.DateReceived) as period_end
+      FROM FactGeneticTestResult f
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      WHERE pr.DoctorId = {doctorId:UInt32}
+        AND f.DateReceived IS NOT NULL
+      GROUP BY formatDateTime(f.DateReceived, {dateFormat:String})
+      ORDER BY date_period DESC
+      LIMIT {limit:UInt32} OFFSET {offset:UInt32}
+    `;
+
+    const dataResult = await this.clickhouseService.query(dataQuery, {
+      doctorId,
+      dateFormat,
+      limit,
+      offset,
+    });
+    const dataArray = Array.isArray(dataResult?.data) ? dataResult.data : [];
+
+    // Format the results
+    const formattedData = dataArray.map((row: any) => {
+      const period = String(row.date_period);
+      let label: string;
+      let startDate: string;
+      let endDate: string;
+
+      if (type === 'day') {
+        // Format: "2025-01-15" -> "15/01/2025"
+        const [year, month, day] = period.split('-');
+        label = `${day}/${month}/${year}`;
+        startDate = `${period}T00:00:00.000Z`;
+        endDate = `${period}T23:59:59.999Z`;
+      } else if (type === 'month') {
+        // Format: "2025-01" -> "Tháng 1/2025"
+        const [year, month] = period.split('-');
+        label = `Tháng ${parseInt(month)}/${year}`;
+        startDate = `${period}-01T00:00:00.000Z`;
+        // Get last day of month
+        const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+        endDate = `${period}-${lastDay.toString().padStart(2, '0')}T23:59:59.999Z`;
+      } else {
+        // Format: "2025" -> "Năm 2025"
+        label = `Năm ${period}`;
+        startDate = `${period}-01-01T00:00:00.000Z`;
+        endDate = `${period}-12-31T23:59:59.999Z`;
+      }
+
+      return {
+        period,
+        label,
+        count: Number(row.patient_count),
+        startDate,
+        endDate,
+      };
+    });
+
+    return {
+      data: formattedData,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+      type,
     };
   }
 }
