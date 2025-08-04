@@ -21,11 +21,8 @@ export class PatientService {
     const { page, limit, search, gender, sortBy, sortOrder } = query;
     const offset = (page - 1) * limit;
 
-    // Build WHERE conditions
-    const conditions = [
-      'pr.DoctorId = {doctorId:UInt32}',
-      'p.IsCurrent = true',
-    ];
+    // Build WHERE conditions (only for patient table, provider filtering is done in subquery)
+    const conditions: string[] = [];
     const params: Record<string, any> = { doctorId };
 
     if (search) {
@@ -49,27 +46,42 @@ export class PatientService {
     ];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'FullName';
 
-    // Build the main query
-    const whereClause =
-      conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    // More efficient query - filter provider first, then join
     const baseQuery = `
       FROM DimPatient p
-      JOIN (
-        SELECT DISTINCT PatientKey, ProviderKey
-        FROM FactGeneticTestResult
-      ) f ON p.PatientKey = f.PatientKey
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      ${whereClause}
+      WHERE p.IsCurrent = 1
+      AND p.PatientKey IN (
+        SELECT DISTINCT f.PatientKey
+        FROM FactGeneticTestResult f
+        JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+        WHERE pr.DoctorId = {doctorId:UInt32}
+        LIMIT 10000
+      )
+      ${conditions.length > 0 ? `AND (${conditions.join(' AND ')})` : ''}
     `;
 
-    // Get total count
-    const countQuery = `SELECT COUNT(DISTINCT p.PatientKey) as total ${baseQuery}`;
+    // Get total count with limit to prevent memory issues
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM (
+        SELECT p.PatientKey
+        ${baseQuery}
+        LIMIT 50000
+      ) subquery
+    `;
+    console.log('🔍 [PatientService] Executing count query:', countQuery);
+    console.log('🔍 [PatientService] With params:', params);
     const countResult = await this.clickhouseService.query(countQuery, params);
-    const total = Number(countResult[0]?.total) || 0;
+    const total = Number((countResult?.data?.[0] as any)?.total) || 0;
 
-    // Get paginated data
+    console.log('📊 [PatientService] Count query result:', {
+      total,
+      countResultType: typeof countResult,
+    });
+
+    // Get paginated data with optimized query
     const dataQuery = `
-      SELECT DISTINCT
+      SELECT
         p.PatientKey,
         p.PatientSourceID,
         p.FullName,
@@ -85,8 +97,40 @@ export class PatientService {
     params.limit = limit;
     params.offset = offset;
 
-    const patients = await this.clickhouseService.query(dataQuery, params);
-    const patientsArray = Array.isArray(patients) ? patients : [];
+    console.log(
+      '🔍 [PatientService] Executing optimized patient query for doctor:',
+      doctorId,
+    );
+    console.log('🔍 [PatientService] Query params:', {
+      page,
+      limit,
+      search,
+      gender,
+      sortBy,
+      sortOrder,
+    });
+
+    console.log('🔍 [PatientService] Executing data query:', dataQuery);
+    console.log('🔍 [PatientService] With params:', params);
+    const patientsResult = await this.clickhouseService.query(
+      dataQuery,
+      params,
+    );
+    const patientsArray = Array.isArray(patientsResult?.data)
+      ? patientsResult.data
+      : [];
+
+    console.log('✅ [PatientService] Query executed successfully. Results:', {
+      rawPatientsType: typeof patientsResult,
+      hasDataProperty: 'data' in (patientsResult || {}),
+      dataType: typeof patientsResult?.data,
+      isDataArray: Array.isArray(patientsResult?.data),
+      patientsArrayLength: patientsArray.length,
+      firstPatient:
+        patientsArray.length > 0
+          ? (patientsArray[0] as ClickHousePatientResult)
+          : 'No patients found',
+    });
 
     return {
       data: patientsArray.map((patient: ClickHousePatientResult) => ({
@@ -113,24 +157,34 @@ export class PatientService {
     doctorId: number,
     patientKey: number,
   ): Promise<PatientDetailDto> {
-    // First, verify that the doctor has access to this patient
+    // First, verify that the doctor has access to this patient (optimized)
     const accessQuery = `
-      SELECT COUNT(*) as hasAccess
+      SELECT 1 as hasAccess
       FROM DimPatient p
-      JOIN FactGeneticTestResult f ON p.PatientKey = f.PatientKey
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
       WHERE p.PatientKey = {patientKey:UInt64}
-        AND pr.DoctorId = {doctorId:UInt32}
         AND p.IsCurrent = true
+        AND p.PatientKey IN (
+          SELECT DISTINCT f.PatientKey
+          FROM FactGeneticTestResult f
+          JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+          WHERE pr.DoctorId = {doctorId:UInt32}
+          LIMIT 1
+        )
+      LIMIT 1
     `;
 
     const accessResult = await this.clickhouseService.query(accessQuery, {
       patientKey,
       doctorId,
     });
-    const accessArray = Array.isArray(accessResult) ? accessResult : [];
+    const accessArray = Array.isArray(accessResult?.data)
+      ? accessResult.data
+      : [];
 
-    if (!accessArray[0]?.hasAccess || Number(accessArray[0].hasAccess) === 0) {
+    if (
+      !(accessArray[0] as any)?.hasAccess ||
+      Number((accessArray[0] as any).hasAccess) === 0
+    ) {
       throw new ForbiddenException(
         'You do not have access to this patient or patient does not exist',
       );
@@ -153,7 +207,9 @@ export class PatientService {
     const patientResult = await this.clickhouseService.query(patientQuery, {
       patientKey,
     });
-    const patientArray = Array.isArray(patientResult) ? patientResult : [];
+    const patientArray = Array.isArray(patientResult?.data)
+      ? patientResult.data
+      : [];
 
     if (!patientArray.length) {
       throw new NotFoundException('Patient not found');
@@ -180,7 +236,7 @@ export class PatientService {
       patientKey,
       doctorId,
     });
-    const testsArray = Array.isArray(recentTests) ? recentTests : [];
+    const testsArray = Array.isArray(recentTests?.data) ? recentTests.data : [];
 
     return {
       PatientKey: Number(patient.PatientKey),

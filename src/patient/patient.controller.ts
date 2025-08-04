@@ -17,6 +17,16 @@ export class PatientController {
     @Query('sortBy') sortBy: string = 'FullName',
     @Query('sortOrder') sortOrder: 'ASC' | 'DESC' = 'ASC',
   ) {
+    console.log('🔍 [PatientController] getPatients called by user:', user.id);
+    console.log('🔍 [PatientController] Query params:', {
+      page,
+      limit,
+      search,
+      gender,
+      sortBy,
+      sortOrder,
+    });
+
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
 
@@ -32,6 +42,12 @@ export class PatientController {
 
   @Get(':id')
   getPatientById(@User() user: UserInfo, @Param('id') id: string) {
+    console.log(
+      '🔍 [PatientController] getPatientById called by user:',
+      user.id,
+    );
+    console.log('🔍 [PatientController] Patient ID:', id);
+
     return this.patientService.getPatientByIdForDoctor(user.id, +id);
   }
 }

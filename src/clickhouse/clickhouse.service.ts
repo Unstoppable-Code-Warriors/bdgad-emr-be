@@ -53,6 +53,7 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
         query,
         query_params: params,
       });
+
       return await result.json();
     } catch (error) {
       console.error('ClickHouse query error:', error);
