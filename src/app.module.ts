@@ -4,7 +4,6 @@ import { AppController } from './app.controller';
 import { ClickHouseModule } from './clickhouse/clickhouse.module';
 import { envValidationSchema } from './config/env.validation';
 import { AuthModule } from './auth/auth.module';
-import { PatientController } from './patient/patient.controller';
 import { PatientModule } from './patient/patient.module';
 
 @Module({
@@ -21,6 +20,6 @@ import { PatientModule } from './patient/patient.module';
     AuthModule,
     PatientModule,
   ],
-  controllers: [AppController, PatientController],
+  controllers: [AppController],
 })
 export class AppModule {}
