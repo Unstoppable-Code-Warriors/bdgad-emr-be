@@ -1,356 +1,430 @@
-import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { ClickHouseService } from '../clickhouse/clickhouse.service';
+import { PatientSearchDto } from './dto/patient-search.dto';
+import { DashboardStatsDto } from './dto/dashboard-stats.dto';
 import {
-  GetPatientsQueryDto,
-  PaginatedPatientsDto,
-  PatientDetailDto,
-  GetPatientDateCountsQueryDto,
-  PaginatedPatientDateCountsDto,
-} from './dto/patient.dto';
+  PatientSummary,
+  PatientDetails,
+  PatientSearchResponse,
+  DashboardStats,
+  TestResult,
+} from './dto/patient-response.dto';
+
+interface ClickHouseQueryResult {
+  data: any[];
+}
+
+interface CountResult {
+  total: number;
+}
+
+interface OwnershipResult {
+  count: number;
+}
+
+interface PeriodStatsResult {
+  totalToday: number;
+  totalThisWeek: number;
+  totalThisMonth: number;
+}
 
 @Injectable()
 export class PatientService {
   constructor(private readonly clickhouseService: ClickHouseService) {}
 
-  async getPatientsByDoctor(
+  async searchPatients(
     doctorId: number,
-    query: GetPatientsQueryDto,
-  ): Promise<PaginatedPatientsDto> {
-    const { page, limit, search, gender, sortBy, sortOrder } = query;
+    searchDto: PatientSearchDto,
+  ): Promise<PatientSearchResponse> {
+    const {
+      page = 1,
+      limit = 20,
+      sortBy = 'lastTestDate',
+      sortOrder = 'DESC',
+    } = searchDto;
     const offset = (page - 1) * limit;
 
-    // Build WHERE conditions (only for patient table, provider filtering is done in subquery)
-    const conditions: string[] = [];
-    const params: Record<string, any> = { doctorId };
+    // Build WHERE conditions
+    const whereConditions = ['pr.DoctorId = {doctorId:UInt32}'];
+    const queryParams: Record<string, any> = { doctorId };
 
-    if (search) {
-      conditions.push(
-        '(p.FullName ILIKE {search:String} OR p.PatientSourceID ILIKE {search:String})',
-      );
-      params.search = `%${search}%`;
+    if (searchDto.name) {
+      whereConditions.push('p.FullName ILIKE {name:String}');
+      queryParams.name = `%${searchDto.name}%`;
     }
 
-    if (gender) {
-      conditions.push('p.Gender = {gender:String}');
-      params.gender = gender;
+    if (searchDto.barcode) {
+      whereConditions.push('p.Barcode = {barcode:String}');
+      queryParams.barcode = searchDto.barcode;
     }
 
-    // Validate sortBy field
-    const allowedSortFields = [
-      'FullName',
-      'DateOfBirth',
-      'Gender',
-      'PatientSourceID',
-    ];
-    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'FullName';
+    if (searchDto.dateFrom) {
+      whereConditions.push('f.DateReceived >= {dateFrom:DateTime}');
+      queryParams.dateFrom = searchDto.dateFrom;
+    }
 
-    // More efficient query - filter provider first, then join
-    const baseQuery = `
-      FROM DimPatient p
-      WHERE p.IsCurrent = 1
-      AND p.PatientKey IN (
-        SELECT DISTINCT f.PatientKey
-        FROM FactGeneticTestResult f
-        JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-        WHERE pr.DoctorId = {doctorId:UInt32}
-        LIMIT 10000
-      )
-      ${conditions.length > 0 ? `AND (${conditions.join(' AND ')})` : ''}
-    `;
+    if (searchDto.dateTo) {
+      whereConditions.push('f.DateReceived <= {dateTo:DateTime}');
+      queryParams.dateTo = searchDto.dateTo;
+    }
 
-    // Get total count with limit to prevent memory issues
-    const countQuery = `
-      SELECT COUNT(*) as total
-      FROM (
-        SELECT p.PatientKey
-        ${baseQuery}
-        LIMIT 50000
-      ) subquery
-    `;
-    const countResult = await this.clickhouseService.query(countQuery, params);
-    const total = Number((countResult?.data?.[0] as any)?.total) || 0;
+    if (searchDto.testType) {
+      whereConditions.push('t.TestCategory = {testType:String}');
+      queryParams.testType = searchDto.testType;
+    }
 
-    // Get paginated data with optimized query
-    const dataQuery = `
-      SELECT
-        p.PatientKey,
-        p.PatientSourceID,
-        p.FullName,
-        p.DateOfBirth,
-        p.Gender,
-        p.Address,
-        p.Barcode
-      ${baseQuery}
-      ORDER BY p.${sortField} ${sortOrder}
+    if (searchDto.diagnosis) {
+      whereConditions.push('d.DiagnosisDescription ILIKE {diagnosis:String}');
+      queryParams.diagnosis = `%${searchDto.diagnosis}%`;
+    }
+
+    const whereClause = whereConditions.join(' AND ');
+
+    // Build ORDER BY clause
+    let orderByClause = '';
+    switch (sortBy) {
+      case 'lastTestDate':
+        orderByClause = `lastTestDate ${sortOrder}`;
+        break;
+      case 'name':
+        orderByClause = `p.FullName ${sortOrder}`;
+        break;
+      case 'dateOfBirth':
+        orderByClause = `p.DateOfBirth ${sortOrder}`;
+        break;
+      default:
+        orderByClause = `lastTestDate ${sortOrder}`;
+    }
+
+    // Main query to get patients
+    const searchQuery = `
+      SELECT DISTINCT
+        p.PatientKey as patientKey,
+        p.FullName as fullName,
+        p.DateOfBirth as dateOfBirth,
+        p.Gender as gender,
+        p.Barcode as barcode,
+        p.Address as address,
+        MAX(f.DateReceived) as lastTestDate,
+        COUNT(f.TestKey) as totalTests,
+        pr.DoctorName as doctorName
+      FROM FactGeneticTestResult f
+      JOIN DimPatient p ON f.PatientKey = p.PatientKey AND p.IsCurrent = true
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      LEFT JOIN DimTest t ON f.TestKey = t.TestKey
+      LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+      WHERE ${whereClause}
+      GROUP BY 
+        p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, 
+        p.Barcode, p.Address, pr.DoctorName
+      ORDER BY ${orderByClause}
       LIMIT {limit:UInt32} OFFSET {offset:UInt32}
     `;
 
-    params.limit = limit;
-    params.offset = offset;
+    // Count query for pagination
+    const countQuery = `
+      SELECT COUNT(DISTINCT p.PatientKey) as total
+      FROM FactGeneticTestResult f
+      JOIN DimPatient p ON f.PatientKey = p.PatientKey AND p.IsCurrent = true
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      LEFT JOIN DimTest t ON f.TestKey = t.TestKey
+      LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+      WHERE ${whereClause}
+    `;
 
-    const patientsResult = await this.clickhouseService.query(
-      dataQuery,
-      params,
-    );
-    const patientsArray = Array.isArray(patientsResult?.data)
-      ? patientsResult.data
-      : [];
+    queryParams.limit = limit;
+    queryParams.offset = offset;
 
-    return {
-      data: patientsArray.map((patient: ClickHousePatientResult) => ({
-        PatientKey: Number(patient.PatientKey),
-        PatientSourceID: String(patient.PatientSourceID),
-        FullName: String(patient.FullName),
-        DateOfBirth: patient.DateOfBirth
-          ? String(patient.DateOfBirth)
-          : undefined,
-        Gender: patient.Gender ? String(patient.Gender) : undefined,
-        Address: patient.Address ? String(patient.Address) : undefined,
-        Barcode: String(patient.Barcode),
-      })),
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+    try {
+      const [searchResult, countResult] = await Promise.all([
+        this.clickhouseService.query(
+          searchQuery,
+          queryParams,
+        ) as Promise<ClickHouseQueryResult>,
+        this.clickhouseService.query(
+          countQuery,
+          queryParams,
+        ) as Promise<ClickHouseQueryResult>,
+      ]);
+
+      const patients = searchResult.data as PatientSummary[];
+      const total = (countResult.data[0] as CountResult)?.total || 0;
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        data: patients,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1,
+        },
+      };
+    } catch (error) {
+      console.error('Error searching patients:', error);
+      throw error;
+    }
   }
 
-  async getPatientByIdForDoctor(
-    doctorId: number,
+  async getPatientDetails(
     patientKey: number,
-  ): Promise<PatientDetailDto> {
-    // First, verify that the doctor has access to this patient (optimized)
-    const accessQuery = `
-      SELECT 1 as hasAccess
-      FROM DimPatient p
-      WHERE p.PatientKey = {patientKey:UInt64}
-        AND p.IsCurrent = true
-        AND p.PatientKey IN (
-          SELECT DISTINCT f.PatientKey
-          FROM FactGeneticTestResult f
-          JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-          WHERE pr.DoctorId = {doctorId:UInt32}
-          LIMIT 1
-        )
-      LIMIT 1
+    doctorId: number,
+  ): Promise<PatientDetails> {
+    // Verify patient belongs to this doctor
+    const ownershipQuery = `
+      SELECT COUNT(*) as count
+      FROM FactGeneticTestResult f
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      WHERE f.PatientKey = {patientKey:UInt64} AND pr.DoctorId = {doctorId:UInt32}
     `;
 
-    const accessResult = await this.clickhouseService.query(accessQuery, {
-      patientKey,
-      doctorId,
-    });
-    const accessArray = Array.isArray(accessResult?.data)
-      ? accessResult.data
-      : [];
+    const ownershipResult = (await this.clickhouseService.query(
+      ownershipQuery,
+      {
+        patientKey,
+        doctorId,
+      },
+    )) as ClickHouseQueryResult;
 
-    if (
-      !(accessArray[0] as any)?.hasAccess ||
-      Number((accessArray[0] as any).hasAccess) === 0
-    ) {
-      throw new ForbiddenException(
-        'You do not have access to this patient or patient does not exist',
-      );
+    if ((ownershipResult.data[0] as OwnershipResult)?.count === 0) {
+      throw new NotFoundException('Patient not found or access denied');
     }
 
-    // Get patient details
+    // Get patient basic info
     const patientQuery = `
       SELECT DISTINCT
-        p.PatientKey,
-        p.PatientSourceID,
-        p.FullName,
-        p.DateOfBirth,
-        p.Gender,
-        p.Address,
-        p.Barcode
-      FROM DimPatient p
-      WHERE p.PatientKey = {patientKey:UInt64} AND p.IsCurrent = true
+        p.PatientKey as patientKey,
+        p.PatientSourceID as patientSourceId,
+        p.FullName as fullName,
+        p.DateOfBirth as dateOfBirth,
+        p.Gender as gender,
+        p.Barcode as barcode,
+        p.Address as address,
+        MAX(f.DateReceived) as lastTestDate,
+        COUNT(f.TestKey) as totalTests,
+        pr.DoctorName as doctorName
+      FROM FactGeneticTestResult f
+      JOIN DimPatient p ON f.PatientKey = p.PatientKey AND p.IsCurrent = true
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      WHERE p.PatientKey = {patientKey:UInt64} AND pr.DoctorId = {doctorId:UInt32}
+      GROUP BY 
+        p.PatientKey, p.PatientSourceID, p.FullName, p.DateOfBirth, 
+        p.Gender, p.Barcode, p.Address, pr.DoctorName
     `;
 
-    const patientResult = await this.clickhouseService.query(patientQuery, {
-      patientKey,
-    });
-    const patientArray = Array.isArray(patientResult?.data)
-      ? patientResult.data
-      : [];
+    // Get recent test results (last 5)
+    const recentTestsQuery = `
+      SELECT
+        f.TestKey as testKey,
+        t.TestName as testName,
+        t.TestCategory as testCategory,
+        f.DateReceived as dateReceived,
+        dd.FullDate as dateReported,
+        d.DiagnosisDescription as diagnosis,
+        v.VariantName as variantName,
+        v.ClinicalSignificance as clinicalSignificance
+      FROM FactGeneticTestResult f
+      LEFT JOIN DimTest t ON f.TestKey = t.TestKey
+      LEFT JOIN DimDate dd ON f.DateReportedKey = dd.DateKey
+      LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+      LEFT JOIN DimVariant v ON f.VariantKey = v.VariantKey
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      WHERE f.PatientKey = {patientKey:UInt64} AND pr.DoctorId = {doctorId:UInt32}
+      ORDER BY f.DateReceived DESC
+      LIMIT 5
+    `;
 
-    if (!patientArray.length) {
-      throw new NotFoundException('Patient not found');
+    try {
+      const [patientResult, recentTestsResult] = await Promise.all([
+        this.clickhouseService.query(patientQuery, {
+          patientKey,
+          doctorId,
+        }) as Promise<ClickHouseQueryResult>,
+        this.clickhouseService.query(recentTestsQuery, {
+          patientKey,
+          doctorId,
+        }) as Promise<ClickHouseQueryResult>,
+      ]);
+
+      const patientData = patientResult.data[0] as PatientSummary & {
+        patientSourceId: string;
+      };
+      if (!patientData) {
+        throw new NotFoundException('Patient not found');
+      }
+
+      const recentTests = recentTestsResult.data as TestResult[];
+
+      return {
+        ...patientData,
+        recentTests,
+        testHistory: [], // Will be loaded separately if needed
+      };
+    } catch (error) {
+      console.error('Error getting patient details:', error);
+      throw error;
+    }
+  }
+
+  async getPatientTestHistory(patientKey: number, doctorId: number) {
+    // Verify ownership first
+    const ownershipQuery = `
+      SELECT COUNT(*) as count
+      FROM FactGeneticTestResult f
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      WHERE f.PatientKey = {patientKey:UInt64} AND pr.DoctorId = {doctorId:UInt32}
+    `;
+
+    const ownershipResult = (await this.clickhouseService.query(
+      ownershipQuery,
+      {
+        patientKey,
+        doctorId,
+      },
+    )) as ClickHouseQueryResult;
+
+    if ((ownershipResult.data[0] as OwnershipResult)?.count === 0) {
+      throw new NotFoundException('Patient not found or access denied');
     }
 
-    const patient = patientArray[0] as ClickHousePatientResult;
-
-    // Get recent tests for this patient (performed by any doctor this doctor has access to)
-    const testsQuery = `
+    const historyQuery = `
       SELECT
-        t.TestName,
-        f.DateReceived,
-        t.TestCategory
+        f.TestKey as testKey,
+        t.TestName as testName,
+        f.DateReceived as dateReceived,
+        pr.DoctorName as doctorName,
+        pr.ClinicName as clinicName,
+        'completed' as status
       FROM FactGeneticTestResult f
-      JOIN DimTest t ON f.TestKey = t.TestKey
+      LEFT JOIN DimTest t ON f.TestKey = t.TestKey
       JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      WHERE f.PatientKey = {patientKey:UInt64}
-        AND pr.DoctorId = {doctorId:UInt32}
+      WHERE f.PatientKey = {patientKey:UInt64} AND pr.DoctorId = {doctorId:UInt32}
       ORDER BY f.DateReceived DESC
+    `;
+
+    try {
+      const result = (await this.clickhouseService.query(historyQuery, {
+        patientKey,
+        doctorId,
+      })) as ClickHouseQueryResult;
+
+      return result.data;
+    } catch (error) {
+      console.error('Error getting patient test history:', error);
+      throw error;
+    }
+  }
+
+  async getDashboardStats(
+    doctorId: number,
+    statsDto: DashboardStatsDto,
+  ): Promise<DashboardStats> {
+    const { period = 'week' } = statsDto;
+
+    // Get date range based on period
+    let dateCondition = '';
+    switch (period) {
+      case 'day':
+        dateCondition = 'f.DateReceived >= today()';
+        break;
+      case 'week':
+        dateCondition = 'f.DateReceived >= date_sub(WEEK, 1, now())';
+        break;
+      case 'month':
+        dateCondition = 'f.DateReceived >= date_sub(MONTH, 1, now())';
+        break;
+      case 'year':
+        dateCondition = 'f.DateReceived >= date_sub(YEAR, 1, now())';
+        break;
+    }
+
+    // Total patients
+    const totalPatientsQuery = `
+      SELECT COUNT(DISTINCT f.PatientKey) as total
+      FROM FactGeneticTestResult f
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      WHERE pr.DoctorId = {doctorId:UInt32}
+    `;
+
+    // Tests by period
+    const testsByPeriodQuery = `
+      SELECT 
+        COUNT(*) as totalToday,
+        COUNT(CASE WHEN f.DateReceived >= date_sub(WEEK, 1, now()) THEN 1 END) as totalThisWeek,
+        COUNT(CASE WHEN f.DateReceived >= date_sub(MONTH, 1, now()) THEN 1 END) as totalThisMonth
+      FROM FactGeneticTestResult f
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      WHERE pr.DoctorId = {doctorId:UInt32} AND f.DateReceived >= today()
+    `;
+
+    // Tests by type
+    const testsByTypeQuery = `
+      SELECT 
+        t.TestCategory as testCategory,
+        COUNT(*) as count
+      FROM FactGeneticTestResult f
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      LEFT JOIN DimTest t ON f.TestKey = t.TestKey
+      WHERE pr.DoctorId = {doctorId:UInt32} AND ${dateCondition}
+      GROUP BY t.TestCategory
+      ORDER BY count DESC
       LIMIT 10
     `;
 
-    const recentTests = await this.clickhouseService.query(testsQuery, {
-      patientKey,
-      doctorId,
-    });
-    const testsArray = Array.isArray(recentTests?.data) ? recentTests.data : [];
-
-    return {
-      PatientKey: Number(patient.PatientKey),
-      PatientSourceID: String(patient.PatientSourceID),
-      FullName: String(patient.FullName),
-      DateOfBirth: patient.DateOfBirth
-        ? String(patient.DateOfBirth)
-        : undefined,
-      Gender: patient.Gender ? String(patient.Gender) : undefined,
-      Address: patient.Address ? String(patient.Address) : undefined,
-      Barcode: String(patient.Barcode),
-      recentTests: testsArray.map((test: ClickHouseTestResult) => ({
-        TestName: String(test.TestName),
-        DateReceived: String(test.DateReceived),
-        TestCategory: String(test.TestCategory),
-      })),
-    };
-  }
-
-  async getPatientDateCounts(
-    doctorId: number,
-    query: GetPatientDateCountsQueryDto,
-  ): Promise<PaginatedPatientDateCountsDto> {
-    const { type, page, limit } = query;
-    const offset = (page - 1) * limit;
-
-    // Define date format and grouping based on type
-    let dateFormat: string;
-
-    switch (type) {
-      case 'day':
-        dateFormat = '%Y-%m-%d';
-        break;
-      case 'month':
-        dateFormat = '%Y-%m';
-        break;
-      case 'year':
-        dateFormat = '%Y';
-        break;
-      default:
-        throw new Error('Invalid date type');
-    }
-
-    // Count total distinct periods
-    const countQuery = `
-      SELECT COUNT(DISTINCT formatDateTime(f.DateReceived, {dateFormat:String})) as total
-      FROM FactGeneticTestResult f
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      WHERE pr.DoctorId = {doctorId:UInt32}
-        AND f.DateReceived IS NOT NULL
-    `;
-
-    const countResult = await this.clickhouseService.query(countQuery, {
-      doctorId,
-      dateFormat,
-    });
-    const total = Number((countResult?.data?.[0] as any)?.total) || 0;
-
-    // Get paginated date counts
-    const dataQuery = `
+    // Top diagnoses
+    const topDiagnosesQuery = `
       SELECT 
-        formatDateTime(f.DateReceived, {dateFormat:String}) as date_period,
-        COUNT(DISTINCT f.PatientKey) as patient_count,
-        MIN(f.DateReceived) as period_start,
-        MAX(f.DateReceived) as period_end
+        d.DiagnosisDescription as diagnosis,
+        COUNT(*) as count
       FROM FactGeneticTestResult f
       JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      WHERE pr.DoctorId = {doctorId:UInt32}
-        AND f.DateReceived IS NOT NULL
-      GROUP BY formatDateTime(f.DateReceived, {dateFormat:String})
-      ORDER BY date_period DESC
-      LIMIT {limit:UInt32} OFFSET {offset:UInt32}
+      LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+      WHERE pr.DoctorId = {doctorId:UInt32} AND ${dateCondition}
+        AND d.DiagnosisDescription IS NOT NULL
+      GROUP BY d.DiagnosisDescription
+      ORDER BY count DESC
+      LIMIT 10
     `;
 
-    const dataResult = await this.clickhouseService.query(dataQuery, {
-      doctorId,
-      dateFormat,
-      limit,
-      offset,
-    });
-    const dataArray = Array.isArray(dataResult?.data) ? dataResult.data : [];
+    try {
+      const [totalResult, periodResult, typeResult, diagnosisResult] =
+        await Promise.all([
+          this.clickhouseService.query(totalPatientsQuery, {
+            doctorId,
+          }) as Promise<ClickHouseQueryResult>,
+          this.clickhouseService.query(testsByPeriodQuery, {
+            doctorId,
+          }) as Promise<ClickHouseQueryResult>,
+          this.clickhouseService.query(testsByTypeQuery, {
+            doctorId,
+          }) as Promise<ClickHouseQueryResult>,
+          this.clickhouseService.query(topDiagnosesQuery, {
+            doctorId,
+          }) as Promise<ClickHouseQueryResult>,
+        ]);
 
-    // Format the results
-    const formattedData = dataArray.map((row: any) => {
-      const period = String(row.date_period);
-      let label: string;
-      let startDate: string;
-      let endDate: string;
-
-      if (type === 'day') {
-        // Format: "2025-01-15" -> "15/01/2025"
-        const [year, month, day] = period.split('-');
-        label = `${day}/${month}/${year}`;
-        startDate = `${period}T00:00:00.000Z`;
-        endDate = `${period}T23:59:59.999Z`;
-      } else if (type === 'month') {
-        // Format: "2025-01" -> "Tháng 1/2025"
-        const [year, month] = period.split('-');
-        label = `Tháng ${parseInt(month)}/${year}`;
-        startDate = `${period}-01T00:00:00.000Z`;
-        // Get last day of month
-        const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
-        endDate = `${period}-${lastDay.toString().padStart(2, '0')}T23:59:59.999Z`;
-      } else {
-        // Format: "2025" -> "Năm 2025"
-        label = `Năm ${period}`;
-        startDate = `${period}-01-01T00:00:00.000Z`;
-        endDate = `${period}-12-31T23:59:59.999Z`;
-      }
+      const periodData = (periodResult.data[0] as PeriodStatsResult) || {};
 
       return {
-        period,
-        label,
-        count: Number(row.patient_count),
-        startDate,
-        endDate,
+        totalPatients: (totalResult.data[0] as CountResult)?.total || 0,
+        totalTestsToday: periodData.totalToday || 0,
+        totalTestsThisWeek: periodData.totalThisWeek || 0,
+        totalTestsThisMonth: periodData.totalThisMonth || 0,
+        testsByType:
+          (typeResult.data as Array<{ testCategory: string; count: number }>) ||
+          [],
+        patientsByPeriod: [], // Can be implemented later if needed
+        topDiagnoses:
+          (diagnosisResult.data as Array<{
+            diagnosis: string;
+            count: number;
+          }>) || [],
       };
-    });
-
-    return {
-      data: formattedData,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-      type,
-    };
+    } catch (error) {
+      console.error('Error getting dashboard stats:', error);
+      throw error;
+    }
   }
-}
-
-// Add interface for ClickHouse patient result
-interface ClickHousePatientResult {
-  PatientKey: number;
-  PatientSourceID: string;
-  FullName: string;
-  DateOfBirth?: string;
-  Gender?: string;
-  Address?: string;
-  Barcode: string;
-}
-
-// Add interface for ClickHouse test result
-interface ClickHouseTestResult {
-  TestName: string;
-  DateReceived: string;
-  TestCategory: string;
 }

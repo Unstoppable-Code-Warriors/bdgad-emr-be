@@ -1,80 +1,50 @@
-import { Controller, Get, Param, UseGuards, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  UseGuards,
+  Query,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { PatientService } from './patient.service';
 import { AuthGuard, User, UserInfo } from 'src/auth';
+import { PatientSearchDto } from './dto/patient-search.dto';
+import { DashboardStatsDto } from './dto/dashboard-stats.dto';
 
 @Controller('patient')
 @UseGuards(AuthGuard)
 export class PatientController {
   constructor(private readonly patientService: PatientService) {}
 
-  @Get()
-  getPatients(
+  @Get('search')
+  async searchPatients(
     @User() user: UserInfo,
-    @Query('page') page: string = '1',
-    @Query('limit') limit: string = '10',
-    @Query('search') search?: string,
-    @Query('gender') gender?: string,
-    @Query('sortBy') sortBy: string = 'FullName',
-    @Query('sortOrder') sortOrder: 'ASC' | 'DESC' = 'ASC',
+    @Query() searchDto: PatientSearchDto,
   ) {
-    console.log('🔍 [PatientController] getPatients called by user:', user.id);
-    console.log('🔍 [PatientController] Query params:', {
-      page,
-      limit,
-      search,
-      gender,
-      sortBy,
-      sortOrder,
-    });
-
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
-
-    return this.patientService.getPatientsByDoctor(user.id, {
-      page: pageNum,
-      limit: limitNum,
-      search,
-      gender,
-      sortBy,
-      sortOrder,
-    });
+    return this.patientService.searchPatients(user.id, searchDto);
   }
 
-  @Get('date')
-  getPatientDateCounts(
+  @Get('dashboard/stats')
+  async getDashboardStats(
     @User() user: UserInfo,
-    @Query('type') type: 'day' | 'month' | 'year' = 'month',
-    @Query('page') page: string = '1',
-    @Query('limit') limit: string = '20',
+    @Query() statsDto: DashboardStatsDto,
   ) {
-    console.log(
-      '🔍 [PatientController] getPatientDateCounts called by user:',
-      user.id,
-    );
-    console.log('🔍 [PatientController] Date query params:', {
-      type,
-      page,
-      limit,
-    });
-
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
-
-    return this.patientService.getPatientDateCounts(user.id, {
-      type,
-      page: pageNum,
-      limit: limitNum,
-    });
+    return this.patientService.getDashboardStats(user.id, statsDto);
   }
 
   @Get(':id')
-  getPatientById(@User() user: UserInfo, @Param('id') id: string) {
-    console.log(
-      '🔍 [PatientController] getPatientById called by user:',
-      user.id,
-    );
-    console.log('🔍 [PatientController] Patient ID:', id);
+  async getPatientDetails(
+    @User() user: UserInfo,
+    @Param('id', ParseIntPipe) patientKey: number,
+  ) {
+    return this.patientService.getPatientDetails(patientKey, user.id);
+  }
 
-    return this.patientService.getPatientByIdForDoctor(user.id, +id);
+  @Get(':id/test-history')
+  async getPatientTestHistory(
+    @User() user: UserInfo,
+    @Param('id', ParseIntPipe) patientKey: number,
+  ) {
+    return this.patientService.getPatientTestHistory(patientKey, user.id);
   }
 }
