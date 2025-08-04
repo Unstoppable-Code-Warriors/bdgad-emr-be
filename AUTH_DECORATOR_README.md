@@ -7,6 +7,30 @@ This project implements a custom `@User()` decorator that automatically extracts
 1. **AuthGuard**: Intercepts requests and validates JWT tokens
 2. **@User() Decorator**: Extracts authenticated user data and injects it into controller methods
 3. **External Auth Service**: Validates tokens via HTTP API call
+4. **Caching System**: Caches valid token verification results to improve performance
+
+## Caching Strategy
+
+The authentication system implements an intelligent caching mechanism to reduce API calls to the external auth service:
+
+- **Cache Key**: `auth_token_${token}` (unique per token)
+- **TTL (Time To Live)**: 5 minutes (300 seconds)
+- **Cache Size**: Maximum 1000 items
+- **Cache Policy**: Only successful authentication responses are cached
+- **Cache Storage**: In-memory using `@nestjs/cache-manager`
+
+### Cache Benefits
+
+- ✅ **Performance**: Reduces API latency for repeated requests with the same token
+- ✅ **Reliability**: Reduces dependency on external auth service availability
+- ✅ **Cost**: Reduces API calls to external service
+- ✅ **User Experience**: Faster response times for authenticated requests
+
+### Cache Invalidation
+
+- **Automatic**: Cached tokens expire after 5 minutes
+- **Manual**: Use `AuthService.clearTokenCache(token)` to invalidate specific tokens
+- **Error Handling**: Failed auth requests are not cached
 
 ## Usage
 
@@ -100,6 +124,8 @@ type ReqUserDto = AuthServiceResponse | AuthServiceErrorResponse;
 
 ## Configuration
 
+### Auth Service URL
+
 The auth service URL is configured via environment variable:
 
 ```env
@@ -107,6 +133,32 @@ AUTH_SERVICE=https://auth.bdgad.bio
 ```
 
 If not set, it defaults to `https://auth.bdgad.bio`.
+
+### Cache Configuration
+
+The caching system can be configured in the `AuthModule`:
+
+```typescript
+CacheModule.register({
+  ttl: 300000, // 5 minutes (in milliseconds)
+  max: 1000, // Maximum number of items in cache
+});
+```
+
+### Manual Cache Management
+
+You can manually manage the cache through the `AuthService`:
+
+```typescript
+// Check if a token is cached
+const isCached = await authService.isTokenCached(token);
+
+// Get cached token data
+const cachedData = await authService.getCachedTokenData(token);
+
+// Clear specific token from cache
+await authService.clearTokenCache(token);
+```
 
 ## Error handling
 
@@ -124,7 +176,9 @@ The guard will throw `UnauthorizedException` in the following cases:
 - `src/auth/interfaces/auth-user.interface.ts` - **Centralized user type from auth service**
 - `src/auth/interfaces/user-info.interface.ts` - User data interface for controllers
 - `src/auth/interfaces/auth-response.interface.ts` - Auth service response types
+- `src/auth/config/auth-cache.config.ts` - **Cache configuration and types**
 - `src/auth/dtos/req-user.dto.ts` - Updated to use centralized types
-- `src/auth/auth.module.ts` - Updated to export guard
+- `src/auth/auth.service.ts` - **Updated with caching functionality**
+- `src/auth/auth.module.ts` - **Updated to include CacheModule**
 - `src/auth/index.ts` - Barrel export file with all types
 - `src/patient/patient.controller.ts` - Example usage
