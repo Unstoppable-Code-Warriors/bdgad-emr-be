@@ -44,41 +44,41 @@ export class PatientService {
     } = searchDto;
     const offset = (page - 1) * limit;
 
-    // Build WHERE conditions
-    const whereConditions = ['pr.DoctorId = {doctorId:UInt32}'];
+    // Build WHERE conditions for filtering patients
+    const filterConditions = ['pr.DoctorId = {doctorId:UInt32}'];
     const queryParams: Record<string, any> = { doctorId };
 
     if (searchDto.name) {
-      whereConditions.push('p.FullName ILIKE {name:String}');
+      filterConditions.push('p.FullName ILIKE {name:String}');
       queryParams.name = `%${searchDto.name}%`;
     }
 
     if (searchDto.barcode) {
-      whereConditions.push('p.Barcode = {barcode:String}');
+      filterConditions.push('p.Barcode = {barcode:String}');
       queryParams.barcode = searchDto.barcode;
     }
 
     if (searchDto.dateFrom) {
-      whereConditions.push('f.DateReceived >= {dateFrom:DateTime}');
+      filterConditions.push('f.DateReceived >= {dateFrom:DateTime}');
       queryParams.dateFrom = searchDto.dateFrom;
     }
 
     if (searchDto.dateTo) {
-      whereConditions.push('f.DateReceived <= {dateTo:DateTime}');
+      filterConditions.push('f.DateReceived <= {dateTo:DateTime}');
       queryParams.dateTo = searchDto.dateTo;
     }
 
     if (searchDto.testType) {
-      whereConditions.push('t.TestCategory = {testType:String}');
+      filterConditions.push('t.TestCategory = {testType:String}');
       queryParams.testType = searchDto.testType;
     }
 
     if (searchDto.diagnosis) {
-      whereConditions.push('d.DiagnosisDescription ILIKE {diagnosis:String}');
+      filterConditions.push('d.DiagnosisDescription ILIKE {diagnosis:String}');
       queryParams.diagnosis = `%${searchDto.diagnosis}%`;
     }
 
-    const whereClause = whereConditions.join(' AND ');
+    const filterWhereClause = filterConditions.join(' AND ');
 
     // Build ORDER BY clause
     let orderByClause = '';
@@ -97,7 +97,17 @@ export class PatientService {
     }
 
     // Main query to get patients
+    // Use CTE to first filter patients that match criteria, then get all their test data
     const searchQuery = `
+      WITH filtered_patients AS (
+        SELECT DISTINCT f.PatientKey as PatientKey
+        FROM FactGeneticTestResult f
+        JOIN DimPatient p ON f.PatientKey = p.PatientKey AND p.IsCurrent = true
+        JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+        LEFT JOIN DimTest t ON f.TestKey = t.TestKey
+        LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+        WHERE ${filterWhereClause}
+      )
       SELECT DISTINCT
         p.PatientKey as patientKey,
         p.FullName as fullName,
@@ -105,15 +115,14 @@ export class PatientService {
         p.Gender as gender,
         p.Barcode as barcode,
         p.Address as address,
-        MAX(f.DateReceived) as lastTestDate,
-        COUNT(f.TestKey) as totalTests,
+        MAX(f_all.DateReceived) as lastTestDate,
+        COUNT(f_all.TestKey) as totalTests,
         pr.DoctorName as doctorName
-      FROM FactGeneticTestResult f
-      JOIN DimPatient p ON f.PatientKey = p.PatientKey AND p.IsCurrent = true
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      LEFT JOIN DimTest t ON f.TestKey = t.TestKey
-      LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
-      WHERE ${whereClause}
+      FROM filtered_patients fp
+      JOIN FactGeneticTestResult f_all ON fp.PatientKey = f_all.PatientKey
+      JOIN DimPatient p ON f_all.PatientKey = p.PatientKey AND p.IsCurrent = true
+      JOIN DimProvider pr ON f_all.ProviderKey = pr.ProviderKey
+      WHERE pr.DoctorId = {doctorId:UInt32}
       GROUP BY 
         p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, 
         p.Barcode, p.Address, pr.DoctorName
@@ -129,7 +138,7 @@ export class PatientService {
       JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
       LEFT JOIN DimTest t ON f.TestKey = t.TestKey
       LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
-      WHERE ${whereClause}
+      WHERE ${filterWhereClause}
     `;
 
     queryParams.limit = limit;
