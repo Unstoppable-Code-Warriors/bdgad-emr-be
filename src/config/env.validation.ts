@@ -14,4 +14,7 @@ export const envValidationSchema = Joi.object({
   CLICKHOUSE_PASSWORD: Joi.string().required(),
   CLICKHOUSE_DATABASE: Joi.string().required(),
   CLICKHOUSE_PROTOCOL: Joi.string().valid('http', 'https').default('http'),
+
+  // RabbitMQ configuration
+  RABBITMQ_URL: Joi.string().required(),
 });
