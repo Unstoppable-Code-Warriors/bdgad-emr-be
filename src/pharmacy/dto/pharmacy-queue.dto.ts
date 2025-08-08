@@ -70,15 +70,32 @@ export class PatientDto {
   @IsOptional()
   @IsString()
   citizen_id?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_of_birth?: string;
 }
 
 export class DoctorDto {
   @IsOptional()
-  id?: string | number;
+  @IsString()
+  id?: string;
+
+  @IsOptional()
+  @IsString()
+  email?: string;
 
   @IsOptional()
   @IsString()
   name?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  address?: string;
 }
 
 export class TestResultDto {
@@ -111,6 +128,10 @@ export class FileAttachmentDto {
   @IsOptional()
   @IsString()
   file_type?: string;
+
+  @IsOptional()
+  @IsNumber()
+  file_size?: number;
 }
 
 export class LabTestDto {
@@ -202,12 +223,7 @@ export class MedicalRecordDto {
   @IsOptional()
   @ValidateNested()
   @Type(() => DoctorDto)
-  incharge_doctor?: DoctorDto;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => DoctorDto)
-  support_doctor?: DoctorDto;
+  doctor?: DoctorDto;
 
   @IsOptional()
   @IsDateString()

@@ -3,9 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { PharmacyController } from './pharmacy.controller';
 import { PharmacyService } from './pharmacy.service';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
   imports: [
+    AiModule,
     ClientsModule.registerAsync([
       {
         name: 'PHARMACY_SERVICE',

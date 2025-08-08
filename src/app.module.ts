@@ -7,6 +7,8 @@ import { envValidationSchema } from './config/env.validation';
 import { AuthModule } from './auth/auth.module';
 import { PatientModule } from './patient/patient.module';
 import { PharmacyModule } from './pharmacy/pharmacy.module';
+import { PharmacyForwardModule } from './pharmacy-forward/pharmacy-forward.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { PharmacyModule } from './pharmacy/pharmacy.module';
     AuthModule,
     PatientModule,
     PharmacyModule,
+    PharmacyForwardModule,
+    AiModule,
   ],
   controllers: [AppController],
 })
