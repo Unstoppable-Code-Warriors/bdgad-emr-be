@@ -23,11 +23,22 @@ async function bootstrap() {
   // Setup microservice to listen to pharmacy queue (safer approach)
   if (rabbitmqUrl) {
     try {
-      const microservice = app.connectMicroservice<MicroserviceOptions>({
+      app.connectMicroservice<MicroserviceOptions>({
         transport: Transport.RMQ,
         options: {
           urls: [rabbitmqUrl],
           queue: 'pharmacy',
+          queueOptions: {
+            durable: false,
+          },
+        },
+      });
+
+      app.connectMicroservice<MicroserviceOptions>({
+        transport: Transport.RMQ,
+        options: {
+          urls: [rabbitmqUrl],
+          queue: 'general_file',
           queueOptions: {
             durable: false,
           },

@@ -1,12 +1,27 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  Inject,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, ClickHouseClient } from '@clickhouse/client';
+import {
+  CLICKHOUSE_MODULE_OPTIONS,
+  ClickHouseModuleOptions,
+} from './clickhouse.module';
 
 @Injectable()
 export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
   private client: ClickHouseClient;
 
-  constructor(private configService: ConfigService) {}
+  constructor(
+    private configService: ConfigService,
+    @Optional()
+    @Inject(CLICKHOUSE_MODULE_OPTIONS)
+    private options: ClickHouseModuleOptions = {},
+  ) {}
 
   async onModuleInit() {
     const protocol = this.configService.get<string>(
@@ -17,7 +32,12 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
     const port = this.configService.get<number>('CLICKHOUSE_PORT', 8123);
     const username = this.configService.get<string>('CLICKHOUSE_USERNAME');
     const password = this.configService.get<string>('CLICKHOUSE_PASSWORD');
-    const database = this.configService.get<string>('CLICKHOUSE_DATABASE');
+
+    // Use database from options first, then fallback to config, then to 'default'
+    const database =
+      this.options?.database ||
+      this.configService.get<string>('CLICKHOUSE_DATABASE') ||
+      'default';
 
     this.client = createClient({
       url: `${protocol}://${host}:${port}`,
@@ -29,7 +49,9 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
     // Test connection
     try {
       await this.client.ping();
-      console.log('ClickHouse connection established successfully');
+      console.log(
+        `ClickHouse connection established successfully to database: ${database}`,
+      );
     } catch (error) {
       console.error('Failed to connect to ClickHouse:', error);
       throw error;
@@ -45,6 +67,14 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
 
   getClient(): ClickHouseClient {
     return this.client;
+  }
+
+  getCurrentDatabase(): string {
+    return (
+      this.options?.database ||
+      this.configService.get<string>('CLICKHOUSE_DATABASE') ||
+      'default'
+    );
   }
 
   async query(query: string, params?: Record<string, any>) {

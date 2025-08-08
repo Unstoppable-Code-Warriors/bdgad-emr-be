@@ -5,7 +5,7 @@ import { ClickHouseModule } from '../clickhouse/clickhouse.module';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [ClickHouseModule, AuthModule],
+  imports: [ClickHouseModule.forFeature(), AuthModule],
   controllers: [PatientController],
   providers: [PatientService],
 })

@@ -9,6 +9,7 @@ import { PatientModule } from './patient/patient.module';
 import { PharmacyModule } from './pharmacy/pharmacy.module';
 import { PharmacyForwardModule } from './pharmacy-forward/pharmacy-forward.module';
 import { AiModule } from './ai/ai.module';
+import { GeneralFilesModule } from './general-files/general-files.module';
 
 @Module({
   imports: [
@@ -21,12 +22,13 @@ import { AiModule } from './ai/ai.module';
       },
     }),
     ScheduleModule.forRoot(),
-    ClickHouseModule,
+    ClickHouseModule.forRoot(), // Using default database
     AuthModule,
     PatientModule,
     PharmacyModule,
     PharmacyForwardModule,
     AiModule,
+    GeneralFilesModule,
   ],
   controllers: [AppController],
 })
