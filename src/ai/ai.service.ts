@@ -1,52 +1,65 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ChatOpenAI } from '@langchain/openai';
-import { PromptTemplate } from '@langchain/core/prompts';
-import { JsonOutputParser } from '@langchain/core/output_parsers';
 import { v4 as uuidv4 } from 'uuid';
 import { PREDEFINED_DOCTORS, DoctorInfo } from './constants/doctors';
 import { generateCCCD } from './utils/cccd-generator';
 import { PharmacyQueueDto } from '../pharmacy/dto/pharmacy-queue.dto';
-import { PatientData, MedicalRecordData } from './types/ai-data.types';
+import {
+  VIETNAMESE_LAST_NAMES,
+  VIETNAMESE_MALE_FIRST_NAMES,
+  VIETNAMESE_FEMALE_FIRST_NAMES,
+  VIETNAMESE_ETHNICITIES,
+  MARITAL_STATUSES,
+  VIETNAM_CITIES,
+  HCM_DISTRICTS,
+  HANOI_DISTRICTS,
+  COMMON_ALLERGIES,
+  PERSONAL_HISTORIES,
+  FAMILY_HISTORIES,
+  WORK_PLACES,
+  getRandomElement,
+  generateVietnamesePhone,
+  generateStreetAddress,
+} from './constants/patient-data';
+import {
+  EXAMINATION_REASONS,
+  CURRENT_STATUSES,
+  TREATMENTS,
+  DIAGNOSES,
+  LAB_TEST_TYPES,
+  BLOOD_TESTS,
+  IMAGING_TESTS,
+  MEDICAL_MACHINES,
+  TECHNICIAN_NAMES,
+  MEDICATIONS,
+  PRESCRIPTION_NOTES,
+  BLOOD_TEST_RESULTS,
+  TEST_CONCLUSIONS,
+  TEST_NOTES,
+} from './constants/medical-data';
 
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
-  private readonly llm: ChatOpenAI;
 
-  constructor(private configService: ConfigService) {
-    const openaiApiKey = this.configService.get<string>('OPENAI_API_KEY');
-
-    if (!openaiApiKey) {
-      this.logger.warn(
-        'OPENAI_API_KEY not configured, AI service will use fallback generation',
-      );
-    }
-
-    this.llm = new ChatOpenAI({
-      configuration: { baseURL: 'https://api.yescale.io/v1' },
-      openAIApiKey: openaiApiKey,
-      modelName: 'gpt-5-nano',
-      temperature: 0.8,
-    });
-  }
+  constructor(private configService: ConfigService) {}
 
   /**
-   * Generate AI-powered mock data for pharmacy queue
+   * Generate mock data for pharmacy queue using constants and random logic
    */
   async generatePharmacyQueueData(
     customData?: Partial<PharmacyQueueDto>,
   ): Promise<PharmacyQueueDto> {
     try {
-      // Generate base data with AI
-      const aiGeneratedData = await this.generateAIPatientData();
+      // Generate base data using constants
+      const patientData = this.generatePatientData();
 
       // Select random doctor from predefined list
       const doctor = this.getRandomDoctor();
 
       // Generate medical record data
-      const medicalRecord = await this.generateMedicalRecord(
-        aiGeneratedData.patient,
+      const medicalRecord = this.generateMedicalRecord(
+        patientData.patient,
         doctor,
       );
 
@@ -56,7 +69,7 @@ export class AiService {
           id: uuidv4(),
           date: new Date().toISOString(),
         },
-        patient: aiGeneratedData.patient,
+        patient: patientData.patient,
         medical_record: {
           ...medicalRecord,
           doctor,
@@ -67,7 +80,7 @@ export class AiService {
       return result;
     } catch (error) {
       this.logger.error(
-        'Failed to generate AI data, falling back to static generation',
+        'Failed to generate data, falling back to static generation',
         error.stack,
       );
       return this.generateFallbackData(customData);
@@ -75,157 +88,211 @@ export class AiService {
   }
 
   /**
-   * Generate patient data using AI
+   * Generate patient data using constants and random combinations
    */
-  private async generateAIPatientData(): Promise<{ patient: any }> {
-    // Set up the JSON output parser
-    const parser = new JsonOutputParser<PatientData>();
+  private generatePatientData(): { patient: any } {
+    const gender = getRandomElement(['Nam', 'Nữ']);
+    const birthYear = 1950 + Math.floor(Math.random() * 61); // 1950-2010
 
-    const prompt = PromptTemplate.fromTemplate(`
-Generate realistic Vietnamese patient information.
+    // Generate name based on gender
+    const lastName = getRandomElement(VIETNAMESE_LAST_NAMES);
+    const firstName =
+      gender === 'Nam'
+        ? getRandomElement(VIETNAMESE_MALE_FIRST_NAMES)
+        : getRandomElement(VIETNAMESE_FEMALE_FIRST_NAMES);
+    const fullname = `${lastName} ${firstName}`;
 
-{format_instructions}
+    // Generate address (diversify by city)
+    const city = getRandomElement(VIETNAM_CITIES);
+    let district: string;
 
-Requirements:
-- Use realistic Vietnamese names
-- All text should be in Vietnamese
-- Phone numbers should be realistic (0901234567 format)
-- Addresses should be real Vietnamese locations
-- Medical histories should be realistic but varied
-- Gender should be either "Nam" or "Nữ"
-- birth_year should be a number between 1950-2010
-
-Structure:
-{{
-  "patient": {{
-    "fullname": "Vietnamese full name (realistic)",
-    "ethnicity": "Vietnamese ethnicity (Kinh, Tày, Thái, etc.)",
-    "marital_status": "marital status in Vietnamese",
-    "address1": "realistic Vietnamese street address",
-    "address2": "ward, district, city in Vietnam",
-    "phone": "Vietnamese phone number format (10 digits starting with 0)",
-    "gender": "Nam or Nữ",
-    "nation": "Việt Nam",
-    "work_address": "realistic workplace address in Vietnam",
-    "allergies": "common allergies in Vietnamese or 'Không có'",
-    "personal_history": "realistic medical history in Vietnamese",
-    "family_history": "realistic family medical history in Vietnamese",
-    "birth_year": number between 1950-2010
-  }}
-}}
-`);
-
-    try {
-      const chain = prompt.pipe(this.llm).pipe(parser);
-
-      const aiData = await chain.invoke({
-        format_instructions: parser.getFormatInstructions(),
-      });
-
-      // Generate CCCD and date_of_birth based on AI data
-      const birthYear = aiData.patient.birth_year || 1990;
-      const birthDate = this.generateBirthDate(birthYear);
-      const cccd = generateCCCD({
-        gender: aiData.patient.gender as 'Nam' | 'Nữ',
-        birthYear: birthYear,
-      });
-
-      aiData.patient.citizen_id = cccd;
-      aiData.patient.date_of_birth = birthDate;
-      delete aiData.patient.birth_year; // Remove helper field
-
-      return aiData;
-    } catch (error) {
-      this.logger.error(
-        'Failed to generate AI patient data, using fallback',
-        error.message,
-      );
-      return this.generateFallbackPatientData();
+    if (city === 'TP.HCM') {
+      district = getRandomElement(HCM_DISTRICTS);
+    } else if (city === 'Hà Nội') {
+      district = getRandomElement(HANOI_DISTRICTS);
+    } else {
+      // Generate generic district for other cities
+      const districtTypes = ['Quận', 'Huyện'];
+      const districtNames = [
+        'Trung tâm',
+        'Nam',
+        'Bắc',
+        'Đông',
+        'Tây',
+        'Thành phố',
+      ];
+      district = `${getRandomElement(districtTypes)} ${getRandomElement(districtNames)}`;
     }
+
+    const streetAddress = generateStreetAddress();
+    const workPlace = getRandomElement(WORK_PLACES);
+    const workAddress = `${workPlace}, ${district}, ${city}`;
+
+    // Generate birth date and CCCD
+    const birthDate = this.generateBirthDate(birthYear);
+    const cccd = generateCCCD({
+      gender: gender as 'Nam' | 'Nữ',
+      birthYear: birthYear,
+    });
+
+    return {
+      patient: {
+        fullname,
+        ethnicity: getRandomElement(VIETNAMESE_ETHNICITIES),
+        marital_status: getRandomElement(MARITAL_STATUSES),
+        address1: streetAddress,
+        address2: `${district}, ${city}`,
+        phone: generateVietnamesePhone(),
+        gender,
+        nation: 'Việt Nam',
+        work_address: workAddress,
+        allergies: getRandomElement(COMMON_ALLERGIES),
+        personal_history: getRandomElement(PERSONAL_HISTORIES),
+        family_history: getRandomElement(FAMILY_HISTORIES),
+        citizen_id: cccd,
+        date_of_birth: birthDate,
+      },
+    };
   }
 
   /**
-   * Generate medical record using AI
+   * Generate medical record using constants and combinations
    */
-  private async generateMedicalRecord(
-    patient: any,
-    doctor: DoctorInfo,
-  ): Promise<any> {
-    // Set up the JSON output parser
-    const parser = new JsonOutputParser<MedicalRecordData>();
+  private generateMedicalRecord(patient: any, doctor: DoctorInfo): any {
+    const now = new Date();
+    const startTime = new Date(now);
+    startTime.setHours(
+      9 + Math.floor(Math.random() * 2),
+      Math.floor(Math.random() * 60),
+      0,
+      0,
+    );
 
-    const prompt = PromptTemplate.fromTemplate(`
-Generate realistic Vietnamese medical record data for patient: {patientName}, Gender: {gender}
+    const prescriptionTime = new Date(startTime);
+    prescriptionTime.setMinutes(
+      prescriptionTime.getMinutes() + 30 + Math.floor(Math.random() * 60),
+    );
 
-{format_instructions}
+    // Generate lab tests (1-3 tests)
+    const numTests = 1 + Math.floor(Math.random() * 3);
+    const labTests = this.generateLabTests(numTests);
 
-Structure example:
-{{
-  "start_at": "ISO datetime string (today around 9-10 AM)",
-  "reason": "realistic Vietnamese medical examination reason",
-  "current_status": "current patient status in Vietnamese",
-  "treatment": "treatment plan in Vietnamese",
-  "diagnoses": "medical diagnosis in Vietnamese",
-  "lab_test": [
-    {{
-      "test_type": "Xét nghiệm or Chẩn đoán hình ảnh",
-      "test_name": "realistic test name in Vietnamese",
-      "machine": "realistic medical equipment name",
-      "taken_by": {{
-        "id": "uuid",
-        "name": "Vietnamese technician name"
-      }},
-      "results": [array of test results with name, value, units, reference_range],
-      "notes": "notes in Vietnamese",
-      "conclusion": "conclusion in Vietnamese"
-    }}
-  ],
-  "prescription": {{
-    "issuedDate": "ISO datetime string (today around 10:30 AM)",
-    "notes": "prescription notes in Vietnamese",
-    "medications": [
-      {{
-        "name": "realistic Vietnamese medication name with dosage",
-        "dosage": "dosage amount",
-        "route": "Uống, Tiêm, etc.",
-        "frequency": "frequency in Vietnamese",
-        "duration": "duration in Vietnamese",
-        "instruction": "instructions in Vietnamese",
-        "quantity": number
-      }}
-    ]
-  }}
-}}
+    // Generate prescription (1-3 medications)
+    const numMedications = 1 + Math.floor(Math.random() * 3);
+    const medications = this.generateMedications(numMedications);
 
-Make it realistic for Vietnamese healthcare context.
-`);
+    return {
+      start_at: startTime.toISOString(),
+      reason: getRandomElement(EXAMINATION_REASONS),
+      current_status: getRandomElement(CURRENT_STATUSES),
+      treatment: getRandomElement(TREATMENTS),
+      diagnoses: getRandomElement(DIAGNOSES),
+      lab_test: labTests,
+      prescription: {
+        issuedDate: prescriptionTime.toISOString(),
+        notes: getRandomElement(PRESCRIPTION_NOTES),
+        medications: medications,
+      },
+    };
+  }
 
-    try {
-      const chain = prompt.pipe(this.llm).pipe(parser);
+  /**
+   * Generate lab tests with variety
+   */
+  private generateLabTests(count: number): any[] {
+    const tests: any[] = [];
+    const usedTests = new Set<string>();
 
-      const medicalData = await chain.invoke({
-        format_instructions: parser.getFormatInstructions(),
-        patientName: patient.fullname,
-        gender: patient.gender,
-      });
+    for (let i = 0; i < count; i++) {
+      const testType = getRandomElement(LAB_TEST_TYPES);
+      let testName: string;
+      let availableTests: string[];
 
-      // Add file attachments for imaging tests
-      if (medicalData.lab_test) {
-        medicalData.lab_test.forEach((test: any) => {
-          if (test.test_type === 'Chẩn đoán hình ảnh') {
-            test.file_attachments = this.generateFileAttachments();
-          }
-        });
+      if (testType === 'Xét nghiệm') {
+        availableTests = BLOOD_TESTS.filter((test) => !usedTests.has(test));
+        if (availableTests.length === 0) availableTests = BLOOD_TESTS;
+        testName = getRandomElement(availableTests);
+      } else {
+        availableTests = IMAGING_TESTS.filter((test) => !usedTests.has(test));
+        if (availableTests.length === 0) availableTests = IMAGING_TESTS;
+        testName = getRandomElement(availableTests);
       }
 
-      return medicalData;
-    } catch (error) {
-      this.logger.error(
-        'Failed to generate medical record with AI, using fallback',
-        error.message,
-      );
-      return this.generateFallbackMedicalRecord();
+      usedTests.add(testName);
+
+      const test: any = {
+        test_type: testType,
+        test_name: testName,
+        machine: getRandomElement(MEDICAL_MACHINES),
+        taken_by: {
+          id: uuidv4(),
+          name: getRandomElement(TECHNICIAN_NAMES),
+        },
+        notes: getRandomElement(TEST_NOTES),
+        conclusion: getRandomElement(TEST_CONCLUSIONS),
+      };
+
+      // Add results for blood tests
+      if (testType === 'Xét nghiệm' && BLOOD_TEST_RESULTS[testName]) {
+        test.results = this.generateTestResults(testName);
+      }
+
+      // Add file attachments for imaging tests
+      if (testType === 'Chẩn đoán hình ảnh') {
+        test.file_attachments = this.generateFileAttachments();
+      }
+
+      tests.push(test);
     }
+
+    return tests;
+  }
+
+  /**
+   * Generate test results with some variation
+   */
+  private generateTestResults(testName: string): any[] {
+    const baseResults = BLOOD_TEST_RESULTS[testName];
+    if (!baseResults) return [];
+
+    return baseResults.map((result) => ({
+      ...result,
+      value: this.varyTestValue(result.value, result.reference_range),
+    }));
+  }
+
+  /**
+   * Vary test values slightly to create realistic variation
+   */
+  private varyTestValue(baseValue: string, referenceRange: string): string {
+    const numValue = parseFloat(baseValue);
+    if (isNaN(numValue)) return baseValue;
+
+    // Add slight variation (±10%)
+    const variation = (Math.random() - 0.5) * 0.2; // -10% to +10%
+    const newValue = numValue * (1 + variation);
+
+    // Keep appropriate decimal places
+    const decimalPlaces = baseValue.includes('.')
+      ? baseValue.split('.')[1].length
+      : 0;
+    return newValue.toFixed(decimalPlaces);
+  }
+
+  /**
+   * Generate medications avoiding duplicates
+   */
+  private generateMedications(count: number): any[] {
+    const availableMeds = [...MEDICATIONS];
+    const selectedMeds: any[] = [];
+
+    for (let i = 0; i < count && availableMeds.length > 0; i++) {
+      const randomIndex = Math.floor(Math.random() * availableMeds.length);
+      const medication = availableMeds.splice(randomIndex, 1)[0];
+      selectedMeds.push({ ...medication });
+    }
+
+    return selectedMeds;
   }
 
   /**
@@ -270,7 +337,7 @@ Make it realistic for Vietnamese healthcare context.
   }
 
   /**
-   * Fallback data generation when AI is not available
+   * Fallback data generation when needed
    */
   private generateFallbackData(
     customData?: Partial<PharmacyQueueDto>,

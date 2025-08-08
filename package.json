@@ -21,7 +21,6 @@
   },
   "dependencies": {
     "@clickhouse/client": "^1.11.2",
-    "@langchain/openai": "^0.6.7",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/cache-manager": "^3.0.1",
     "@nestjs/common": "^11.0.1",
@@ -39,7 +38,6 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "joi": "^17.13.3",
-    "langchain": "^0.3.30",
     "path": "^0.12.7",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
