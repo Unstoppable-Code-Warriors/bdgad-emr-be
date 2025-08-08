@@ -24,7 +24,7 @@ export class AiService {
     }
 
     this.llm = new ChatOpenAI({
-      configuration: { baseURL: 'https://api.yesclae.io/v1' },
+      configuration: { baseURL: 'https://api.yescale.io/v1' },
       openAIApiKey: openaiApiKey,
       modelName: 'gpt-5-nano',
       temperature: 0.8,
