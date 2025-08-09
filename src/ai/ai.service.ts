@@ -1,9 +1,16 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { PREDEFINED_DOCTORS, DoctorInfo } from './constants/doctors';
 import { generateCCCD } from './utils/cccd-generator';
-import { PharmacyQueueDto } from '../pharmacy/dto/pharmacy-queue.dto';
+import {
+  PharmacyQueueDto,
+  PatientDto,
+  MedicalRecordDto,
+  LabTestDto,
+  TestResultDto,
+  FileAttachmentDto,
+  MedicationDto,
+} from '../pharmacy/dto/pharmacy-queue.dto';
 import {
   VIETNAMESE_LAST_NAMES,
   VIETNAMESE_MALE_FIRST_NAMES,
@@ -37,12 +44,47 @@ import {
   TEST_CONCLUSIONS,
   TEST_NOTES,
 } from './constants/medical-data';
+import { ChatOpenAI } from '@langchain/openai';
+import { McpClientService } from '../mcp-client/mcp-client.service';
+import { createReactAgent } from '@langchain/langgraph/prebuilt';
+
+type CreateReactAgentInput = Parameters<typeof createReactAgent>[0];
+type AgentTools = CreateReactAgentInput extends { tools: infer T } ? T : never;
 
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
 
-  constructor(private configService: ConfigService) {}
+  constructor(
+    private readonly mcpClientService: McpClientService,
+    @Inject('LLM') private readonly llm: ChatOpenAI,
+  ) {}
+
+  private toolsPromise?: Promise<AgentTools>;
+  private agentPromise?: Promise<ReturnType<typeof createReactAgent>>;
+
+  getTools(): Promise<AgentTools> {
+    if (!this.toolsPromise) {
+      this.toolsPromise =
+        this.mcpClientService.getTools() as unknown as Promise<AgentTools>;
+    }
+    return this.toolsPromise;
+  }
+
+  async getAgent(): Promise<ReturnType<typeof createReactAgent>> {
+    if (!this.agentPromise) {
+      this.agentPromise = (async () => {
+        const tools = await this.getTools();
+        return createReactAgent({ llm: this.llm, tools });
+      })();
+    }
+    return this.agentPromise;
+  }
+
+  invalidateTools() {
+    this.toolsPromise = undefined;
+    this.agentPromise = undefined;
+  }
 
   /**
    * Generate mock data for pharmacy queue using constants and random logic
@@ -51,19 +93,13 @@ export class AiService {
     customData?: Partial<PharmacyQueueDto>,
   ): Promise<PharmacyQueueDto> {
     try {
-      // Generate base data using constants
       const patientData = this.generatePatientData();
-
-      // Select random doctor from predefined list
       const doctor = this.getRandomDoctor();
-
-      // Generate medical record data
       const medicalRecord = this.generateMedicalRecord(
         patientData.patient,
         doctor,
       );
 
-      // Combine all data
       const result: PharmacyQueueDto = {
         appointment: {
           id: uuidv4(),
@@ -74,14 +110,14 @@ export class AiService {
           ...medicalRecord,
           doctor,
         },
-        ...customData, // Allow override with custom data
+        ...customData,
       };
 
       return result;
     } catch (error) {
       this.logger.error(
         'Failed to generate data, falling back to static generation',
-        error.stack,
+        (error as Error).stack,
       );
       return this.generateFallbackData(customData);
     }
@@ -90,11 +126,10 @@ export class AiService {
   /**
    * Generate patient data using constants and random combinations
    */
-  private generatePatientData(): { patient: any } {
+  private generatePatientData(): { patient: PatientDto } {
     const gender = getRandomElement(['Nam', 'Nữ']);
-    const birthYear = 1950 + Math.floor(Math.random() * 61); // 1950-2010
+    const birthYear = 1950 + Math.floor(Math.random() * 61);
 
-    // Generate name based on gender
     const lastName = getRandomElement(VIETNAMESE_LAST_NAMES);
     const firstName =
       gender === 'Nam'
@@ -102,7 +137,6 @@ export class AiService {
         : getRandomElement(VIETNAMESE_FEMALE_FIRST_NAMES);
     const fullname = `${lastName} ${firstName}`;
 
-    // Generate address (diversify by city)
     const city = getRandomElement(VIETNAM_CITIES);
     let district: string;
 
@@ -111,7 +145,6 @@ export class AiService {
     } else if (city === 'Hà Nội') {
       district = getRandomElement(HANOI_DISTRICTS);
     } else {
-      // Generate generic district for other cities
       const districtTypes = ['Quận', 'Huyện'];
       const districtNames = [
         'Trung tâm',
@@ -128,7 +161,6 @@ export class AiService {
     const workPlace = getRandomElement(WORK_PLACES);
     const workAddress = `${workPlace}, ${district}, ${city}`;
 
-    // Generate birth date and CCCD
     const birthDate = this.generateBirthDate(birthYear);
     const cccd = generateCCCD({
       gender: gender as 'Nam' | 'Nữ',
@@ -158,7 +190,10 @@ export class AiService {
   /**
    * Generate medical record using constants and combinations
    */
-  private generateMedicalRecord(patient: any, doctor: DoctorInfo): any {
+  private generateMedicalRecord(
+    patient: PatientDto,
+    doctor: DoctorInfo,
+  ): Omit<MedicalRecordDto, 'doctor'> {
     const now = new Date();
     const startTime = new Date(now);
     startTime.setHours(
@@ -173,11 +208,9 @@ export class AiService {
       prescriptionTime.getMinutes() + 30 + Math.floor(Math.random() * 60),
     );
 
-    // Generate lab tests (1-3 tests)
     const numTests = 1 + Math.floor(Math.random() * 3);
     const labTests = this.generateLabTests(numTests);
 
-    // Generate prescription (1-3 medications)
     const numMedications = 1 + Math.floor(Math.random() * 3);
     const medications = this.generateMedications(numMedications);
 
@@ -199,8 +232,8 @@ export class AiService {
   /**
    * Generate lab tests with variety
    */
-  private generateLabTests(count: number): any[] {
-    const tests: any[] = [];
+  private generateLabTests(count: number): LabTestDto[] {
+    const tests: LabTestDto[] = [];
     const usedTests = new Set<string>();
 
     for (let i = 0; i < count; i++) {
@@ -220,7 +253,7 @@ export class AiService {
 
       usedTests.add(testName);
 
-      const test: any = {
+      const test: LabTestDto = {
         test_type: testType,
         test_name: testName,
         machine: getRandomElement(MEDICAL_MACHINES),
@@ -232,12 +265,10 @@ export class AiService {
         conclusion: getRandomElement(TEST_CONCLUSIONS),
       };
 
-      // Add results for blood tests
       if (testType === 'Xét nghiệm' && BLOOD_TEST_RESULTS[testName]) {
         test.results = this.generateTestResults(testName);
       }
 
-      // Add file attachments for imaging tests
       if (testType === 'Chẩn đoán hình ảnh') {
         test.file_attachments = this.generateFileAttachments();
       }
@@ -251,13 +282,18 @@ export class AiService {
   /**
    * Generate test results with some variation
    */
-  private generateTestResults(testName: string): any[] {
-    const baseResults = BLOOD_TEST_RESULTS[testName];
+  private generateTestResults(testName: string): TestResultDto[] {
+    const baseResults = BLOOD_TEST_RESULTS[testName] as
+      | TestResultDto[]
+      | undefined;
     if (!baseResults) return [];
 
     return baseResults.map((result) => ({
       ...result,
-      value: this.varyTestValue(result.value, result.reference_range),
+      value: this.varyTestValue(
+        result.value ?? '',
+        result.reference_range ?? '',
+      ),
     }));
   }
 
@@ -268,11 +304,9 @@ export class AiService {
     const numValue = parseFloat(baseValue);
     if (isNaN(numValue)) return baseValue;
 
-    // Add slight variation (±10%)
-    const variation = (Math.random() - 0.5) * 0.2; // -10% to +10%
+    const variation = (Math.random() - 0.5) * 0.2;
     const newValue = numValue * (1 + variation);
 
-    // Keep appropriate decimal places
     const decimalPlaces = baseValue.includes('.')
       ? baseValue.split('.')[1].length
       : 0;
@@ -282,9 +316,9 @@ export class AiService {
   /**
    * Generate medications avoiding duplicates
    */
-  private generateMedications(count: number): any[] {
+  private generateMedications(count: number): MedicationDto[] {
     const availableMeds = [...MEDICATIONS];
-    const selectedMeds: any[] = [];
+    const selectedMeds: MedicationDto[] = [];
 
     for (let i = 0; i < count && availableMeds.length > 0; i++) {
       const randomIndex = Math.floor(Math.random() * availableMeds.length);
@@ -316,7 +350,7 @@ export class AiService {
   /**
    * Generate file attachments for medical tests
    */
-  private generateFileAttachments(): any[] {
+  private generateFileAttachments(): FileAttachmentDto[] {
     const timestamp = Date.now();
     const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
 
@@ -362,10 +396,10 @@ export class AiService {
   /**
    * Fallback patient data generation
    */
-  private generateFallbackPatientData(): { patient: any } {
-    const genders = ['Nam', 'Nữ'];
+  private generateFallbackPatientData(): { patient: PatientDto } {
+    const genders = ['Nam', 'Nữ'] as const;
     const gender = genders[Math.floor(Math.random() * genders.length)];
-    const birthYear = 1970 + Math.floor(Math.random() * 40); // 1970-2009
+    const birthYear = 1970 + Math.floor(Math.random() * 40);
 
     return {
       patient: {
@@ -390,7 +424,7 @@ export class AiService {
   /**
    * Fallback medical record generation
    */
-  private generateFallbackMedicalRecord(): any {
+  private generateFallbackMedicalRecord(): Omit<MedicalRecordDto, 'doctor'> {
     return {
       start_at: new Date().toISOString(),
       reason: 'Khám sức khỏe định kỳ',

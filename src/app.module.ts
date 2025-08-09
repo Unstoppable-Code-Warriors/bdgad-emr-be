@@ -11,6 +11,7 @@ import { PharmacyForwardModule } from './pharmacy-forward/pharmacy-forward.modul
 import { AiModule } from './ai/ai.module';
 import { GeneralFilesModule } from './general-files/general-files.module';
 import { MockEtlModule } from './mock-etl/mock-etl.module';
+import { McpClientModule } from './mcp-client/mcp-client.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { MockEtlModule } from './mock-etl/mock-etl.module';
     AiModule,
     GeneralFilesModule,
     MockEtlModule,
+    McpClientModule,
   ],
   controllers: [AppController],
 })
