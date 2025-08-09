@@ -10,6 +10,7 @@ import { PharmacyModule } from './pharmacy/pharmacy.module';
 import { PharmacyForwardModule } from './pharmacy-forward/pharmacy-forward.module';
 import { AiModule } from './ai/ai.module';
 import { GeneralFilesModule } from './general-files/general-files.module';
+import { MockEtlModule } from './mock-etl/mock-etl.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { GeneralFilesModule } from './general-files/general-files.module';
     PharmacyForwardModule,
     AiModule,
     GeneralFilesModule,
+    MockEtlModule,
   ],
   controllers: [AppController],
 })
