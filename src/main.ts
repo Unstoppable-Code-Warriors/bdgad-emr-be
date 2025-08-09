@@ -13,8 +13,34 @@ async function bootstrap() {
         /^https?:\/\/.*\.bdgad\.bio$/,
         /^https?:\/\/bdgad\.bio$/,
       ],
-      methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-      allowedHeaders: 'Content-Type, Authorization',
+      methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'Accept',
+        'Accept-Language',
+        'Cache-Control',
+        'Connection',
+        'Host',
+        'Origin',
+        'Referer',
+        'User-Agent',
+        // OpenAI SDK and similar libraries headers
+        'x-stainless-os',
+        'x-stainless-arch',
+        'x-stainless-package-version',
+        'x-stainless-runtime',
+        'x-stainless-runtime-version',
+        'x-stainless-lang',
+        'x-stainless-retry-count',
+        // Additional common headers
+        'x-requested-with',
+        'x-api-key',
+        'x-client-version',
+      ],
+      credentials: true,
+      preflightContinue: false,
+      optionsSuccessStatus: 204,
     });
 
     const configService = app.get(ConfigService);

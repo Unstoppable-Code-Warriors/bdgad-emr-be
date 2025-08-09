@@ -10,9 +10,9 @@ import { HealthController } from './health.controller';
       prefixToolNameWithServerName: false,
       additionalToolNamePrefix: '',
       mcpServers: {
-        myServer: {
+        aiSearch: {
           transport: 'sse',
-          url: 'http://ai-search.bdgad.bio/sse',
+          url: 'https://ai-search.bdgad.bio/sse',
           reconnect: {
             enabled: true,
             maxAttempts: 5,
