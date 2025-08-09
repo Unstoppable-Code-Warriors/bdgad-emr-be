@@ -47,6 +47,8 @@ import {
 import { ChatOpenAI } from '@langchain/openai';
 import { McpClientService } from '../mcp-client/mcp-client.service';
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
+import { ConfigService } from '@nestjs/config';
+import { DEFAULT_MODEL } from '../ai-chat/constants/models';
 
 type CreateReactAgentInput = Parameters<typeof createReactAgent>[0];
 type AgentTools = CreateReactAgentInput extends { tools: infer T } ? T : never;
@@ -55,35 +57,84 @@ type AgentTools = CreateReactAgentInput extends { tools: infer T } ? T : never;
 export class AiService {
   private readonly logger = new Logger(AiService.name);
 
+  private llm: ChatOpenAI;
+
   constructor(
     private readonly mcpClientService: McpClientService,
-    @Inject('LLM') private readonly llm: ChatOpenAI,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.llm = new ChatOpenAI({
+      model: DEFAULT_MODEL,
+      apiKey: this.configService.get('OPENAI_API_KEY'),
+      configuration: {
+        baseURL: this.configService.get('OPENAI_API_URL'),
+        apiKey: this.configService.get('OPENAI_API_KEY'),
+      },
+    });
+  }
 
-  private toolsPromise?: Promise<AgentTools>;
-  private agentPromise?: Promise<ReturnType<typeof createReactAgent>>;
+  getLLM() {
+    return this.llm;
+  }
 
-  getTools(): Promise<AgentTools> {
-    if (!this.toolsPromise) {
-      this.toolsPromise =
-        this.mcpClientService.getTools() as unknown as Promise<AgentTools>;
+  async getTools() {
+    this.logger.log('🔧 Loading tools from MCP client...');
+    try {
+      const tools = await this.mcpClientService.getTools();
+
+      this.logger.log(
+        `✅ Successfully loaded ${tools.length} tools for AI agent`,
+      );
+
+      if (tools.length > 0) {
+        this.logger.log('🛠️  Available tools for AI agent:');
+        tools.forEach((tool, index) => {
+          const toolName =
+            typeof tool === 'object' && tool && 'name' in tool
+              ? tool.name
+              : `Tool ${index + 1}`;
+          this.logger.log(`  ${index + 1}. 🔧 ${toolName}`);
+        });
+      } else {
+        this.logger.warn('⚠️  No tools available for AI agent');
+      }
+      return tools;
+    } catch (error) {
+      this.logger.error(
+        '❌ Failed to load tools from MCP client:',
+        error.message,
+      );
+      throw error;
     }
-    return this.toolsPromise;
   }
 
   async getAgent(): Promise<ReturnType<typeof createReactAgent>> {
-    if (!this.agentPromise) {
-      this.agentPromise = (async () => {
-        const tools = await this.getTools();
-        return createReactAgent({ llm: this.llm, tools });
-      })();
-    }
-    return this.agentPromise;
-  }
+    this.logger.log('🤖 Creating AI agent with LangChain...');
 
-  invalidateTools() {
-    this.toolsPromise = undefined;
-    this.agentPromise = undefined;
+    // Log LLM configuration for debugging
+    this.logger.log('🔧 LLM Configuration:');
+    this.logger.log(`  🎯 Model: ${this.llm.model || 'Unknown'}`);
+    this.logger.log(`  📊 Max Tokens: ${this.llm.maxTokens || 'Default'}`);
+    this.logger.log(`  🌡️  Temperature: ${this.llm.temperature || 'Default'}`);
+
+    // Log configuration safely without accessing private properties
+    this.logger.log(
+      '  🔧 LLM instance created - configuration details available in AI module',
+    );
+
+    try {
+      const tools = await this.getTools();
+      const agent = createReactAgent({ llm: this.llm, tools });
+
+      // Handle different tool types for logging
+      this.logger.log(`✅ AI agent created successfully`);
+      this.logger.log(`🧠 Agent model: ${this.llm.model || 'Unknown'}`);
+      return agent;
+    } catch (error) {
+      this.logger.error('❌ Failed to create AI agent:', error.message);
+      this.logger.error('🚨 Agent creation stack:', error.stack);
+      throw error;
+    }
   }
 
   /**

@@ -1,8 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AiService } from './ai.service';
 import { McpClientModule } from '../mcp-client/mcp-client.module';
-import { ConfigService } from '@nestjs/config';
-import { ChatOpenAI } from '@langchain/openai';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
@@ -13,7 +12,7 @@ import { ChatOpenAI } from '@langchain/openai';
       mcpServers: {
         myServer: {
           transport: 'sse',
-          url: 'http://localhost:3000/sse',
+          url: 'http://ai-search.bdgad.bio/sse',
           reconnect: {
             enabled: true,
             maxAttempts: 5,
@@ -23,21 +22,8 @@ import { ChatOpenAI } from '@langchain/openai';
       },
     }),
   ],
-  providers: [
-    AiService,
-    {
-      provide: 'LLM',
-      useFactory: (config: ConfigService) =>
-        new ChatOpenAI({
-          model: config.get('OPENAI_MODEL') ?? 'gpt-4o-mini',
-          configuration: {
-            baseURL: config.get('OPENAI_API_URL'),
-            apiKey: config.get('OPENAI_API_KEY'),
-          },
-        }),
-      inject: [ConfigService],
-    },
-  ],
+  controllers: [HealthController],
+  providers: [AiService],
   exports: [AiService],
 })
 export class AiModule {}
