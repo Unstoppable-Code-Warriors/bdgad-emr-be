@@ -8,6 +8,7 @@ import {
   PatientSearchResponse,
   DashboardStats,
   TestResult,
+  TestHistoryItem,
 } from './dto/patient-response.dto';
 
 interface ClickHouseQueryResult {
@@ -353,12 +354,14 @@ export class PatientService {
         d.DiagnosisDescription as diagnosis,
         v.VariantName as variantName,
         v.ClinicalSignificance as clinicalSignificance,
-        f.Location as location
+        f.Location as location,
+        tr.result_etl_url as resultEtlUrl
       FROM FactGeneticTestResult f
       LEFT JOIN DimTest t ON f.TestKey = t.TestKey
       LEFT JOIN DimDate dd ON f.DateReportedKey = dd.DateKey
       LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
       LEFT JOIN DimVariant v ON f.VariantKey = v.VariantKey
+      LEFT JOIN DimTestRun tr ON f.TestRunKey = tr.TestRunKey
       WHERE f.PatientKey = {patientKey:UInt64}
       ORDER BY f.DateReceived DESC
       LIMIT 5
@@ -418,7 +421,10 @@ export class PatientService {
     }
   }
 
-  async getPatientTestHistory(patientKey: number, doctorId: number) {
+  async getPatientTestHistory(
+    patientKey: number,
+    doctorId: number,
+  ): Promise<TestHistoryItem[]> {
     // Verify ownership first - patient must have at least one visit with this doctor
     const ownershipQuery = `
       SELECT COUNT(*) as count
@@ -448,10 +454,12 @@ export class PatientService {
         pr.DoctorName as doctorName,
         pr.ClinicName as clinicName,
         'completed' as status,
-        f.Location as location
+        f.Location as location,
+        tr.result_etl_url as resultEtlUrl
       FROM FactGeneticTestResult f
       LEFT JOIN DimTest t ON f.TestKey = t.TestKey
       LEFT JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      LEFT JOIN DimTestRun tr ON f.TestRunKey = tr.TestRunKey
       WHERE f.PatientKey = {patientKey:UInt64}
       ORDER BY f.DateReceived DESC
     `;
@@ -462,7 +470,7 @@ export class PatientService {
         // Remove doctorId parameter since we want all history
       })) as ClickHouseQueryResult;
 
-      return result.data;
+      return result.data as TestHistoryItem[];
     } catch (error) {
       console.error('Error getting patient test history:', error);
       throw error;

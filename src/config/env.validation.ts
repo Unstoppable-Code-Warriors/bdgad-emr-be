@@ -24,4 +24,9 @@ export const envValidationSchema = Joi.object({
 
   // AI Chat configuration
   SYSTEM_PROMPT: Joi.string().optional(),
+
+  // S3/Cloudflare R2 configuration
+  S3_ENDPOINT: Joi.string().required(),
+  S3_ACCESS_KEY_ID: Joi.string().required(),
+  S3_SECRET_ACCESS_KEY: Joi.string().required(),
 });

@@ -12,6 +12,7 @@ import { AiModule } from './ai/ai.module';
 import { GeneralFilesModule } from './general-files/general-files.module';
 import { MockEtlModule } from './mock-etl/mock-etl.module';
 import { AiChatModule } from './ai-chat/ai-chat.module';
+import { S3Module } from './s3/s3.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AiChatModule } from './ai-chat/ai-chat.module';
     GeneralFilesModule,
     MockEtlModule,
     AiChatModule,
+    S3Module,
   ],
   controllers: [AppController],
 })

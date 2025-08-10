@@ -26,6 +26,7 @@ export interface TestResult {
   variantName: string | null;
   clinicalSignificance: string | null;
   location: string | null; // 'pharmacy' or 'bdgad'
+  resultEtlUrl: string | null; // URL kết quả ETL từ DimTestRun
 }
 
 export interface TestHistoryItem {
@@ -36,6 +37,7 @@ export interface TestHistoryItem {
   clinicName: string;
   status: 'completed' | 'pending' | 'cancelled';
   location: string | null; // 'pharmacy' or 'bdgad'
+  resultEtlUrl: string | null; // URL kết quả ETL từ DimTestRun
 }
 
 export interface PatientSearchResponse {

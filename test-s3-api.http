@@ -1,0 +1,31 @@
+### Test S3 File Download API
+
+# Generate download URL
+POST http://localhost:4000/files/download
+Content-Type: application/json
+
+{
+  "s3Url": "https://d46919b3b31b61ac349836b18c9ac671.r2.cloudflarestorage.com/test-bucket/sample-file.pdf",
+  "expiresIn": 1800
+}
+
+###
+
+# Check if file exists
+POST http://localhost:4000/files/check
+Content-Type: application/json
+
+{
+  "s3Url": "https://d46919b3b31b61ac349836b18c9ac671.r2.cloudflarestorage.com/test-bucket/sample-file.pdf"
+}
+
+###
+
+# Test with invalid URL (should return error)
+POST http://localhost:4000/files/download
+Content-Type: application/json
+
+{
+  "s3Url": "invalid-url-format",
+  "expiresIn": 3600
+} 
