@@ -147,6 +147,11 @@ export class PatientService {
         FROM FactGeneticTestResult f
         JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
         WHERE pr.DoctorId = {doctorId:UInt32}
+      ),
+      latest_patient_data AS (
+        SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address,
+               ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
+        FROM DimPatient
       )
       SELECT DISTINCT
         p.PatientKey as patientKey,
@@ -159,7 +164,7 @@ export class PatientService {
         COUNT(f_all.TestKey) as totalTests,
         di.DoctorName as doctorName
       FROM patients_with_doctor pwd
-      JOIN DimPatient p ON pwd.PatientKey = p.PatientKey AND p.IsCurrent = true
+      JOIN latest_patient_data p ON pwd.PatientKey = p.PatientKey AND p.rn = 1
       JOIN FactGeneticTestResult f_all ON pwd.PatientKey = f_all.PatientKey
       JOIN doctor_info di ON pwd.PatientKey = di.PatientKey
       ${
@@ -184,10 +189,15 @@ export class PatientService {
     const countQuery = `
       WITH patients_with_doctor AS (
         ${patientsWithDoctorQuery}
+      ),
+      latest_patient_data AS (
+        SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address,
+               ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
+        FROM DimPatient
       )
       SELECT COUNT(DISTINCT p.PatientKey) as total
       FROM patients_with_doctor pwd
-      JOIN DimPatient p ON pwd.PatientKey = p.PatientKey AND p.IsCurrent = true
+      JOIN latest_patient_data p ON pwd.PatientKey = p.PatientKey AND p.rn = 1
       ${
         filterConditions.length > 0
           ? `
@@ -294,8 +304,14 @@ export class PatientService {
       throw new NotFoundException('Patient not found or access denied');
     }
 
-    // Get patient basic info
+    // Get patient basic info (latest record)
     const patientInfoQuery = `
+      WITH latest_patient_data AS (
+        SELECT PatientKey, PatientSourceID, FullName, DateOfBirth, Gender, Barcode, Address,
+               ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
+        FROM DimPatient
+        WHERE PatientKey = {patientKey:UInt64}
+      )
       SELECT 
         p.PatientKey as patientKey,
         p.PatientSourceID as patientSourceId,
@@ -304,8 +320,8 @@ export class PatientService {
         p.Gender as gender,
         p.Barcode as barcode,
         p.Address as address
-      FROM DimPatient p
-      WHERE p.PatientKey = {patientKey:UInt64} AND p.IsCurrent = true
+      FROM latest_patient_data p
+      WHERE p.rn = 1
     `;
 
     // Get patient test statistics from ALL tests
@@ -463,61 +479,78 @@ export class PatientService {
     let dateCondition = '';
     switch (period) {
       case 'day':
-        dateCondition = 'f.DateReceived >= today()';
+        dateCondition = 'f_all.DateReceived >= today()';
         break;
       case 'week':
-        dateCondition = 'f.DateReceived >= date_sub(WEEK, 1, now())';
+        dateCondition = 'f_all.DateReceived >= date_sub(WEEK, 1, now())';
         break;
       case 'month':
-        dateCondition = 'f.DateReceived >= date_sub(MONTH, 1, now())';
+        dateCondition = 'f_all.DateReceived >= date_sub(MONTH, 1, now())';
         break;
       case 'year':
-        dateCondition = 'f.DateReceived >= date_sub(YEAR, 1, now())';
+        dateCondition = 'f_all.DateReceived >= date_sub(YEAR, 1, now())';
         break;
     }
 
-    // Total patients
-    const totalPatientsQuery = `
-      SELECT COUNT(DISTINCT f.PatientKey) as total
+    // Get patients that have at least one test with current doctor
+    const patientsWithDoctorQuery = `
+      SELECT DISTINCT f.PatientKey
       FROM FactGeneticTestResult f
       JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
       WHERE pr.DoctorId = {doctorId:UInt32}
     `;
 
-    // Tests by period
-    const testsByPeriodQuery = `
-      SELECT 
-        COUNT(*) as totalToday,
-        COUNT(CASE WHEN f.DateReceived >= date_sub(WEEK, 1, now()) THEN 1 END) as totalThisWeek,
-        COUNT(CASE WHEN f.DateReceived >= date_sub(MONTH, 1, now()) THEN 1 END) as totalThisMonth
-      FROM FactGeneticTestResult f
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      WHERE pr.DoctorId = {doctorId:UInt32} AND f.DateReceived >= today()
+    // Total patients (that have at least one test with current doctor)
+    const totalPatientsQuery = `
+      WITH patients_with_doctor AS (
+        ${patientsWithDoctorQuery}
+      )
+      SELECT COUNT(DISTINCT pwd.PatientKey) as total
+      FROM patients_with_doctor pwd
     `;
 
-    // Tests by type
+    // Tests by period (ALL tests from patients that belong to current doctor)
+    const testsByPeriodQuery = `
+      WITH patients_with_doctor AS (
+        ${patientsWithDoctorQuery}
+      )
+      SELECT 
+        COUNT(CASE WHEN f_all.DateReceived >= today() THEN 1 END) as totalToday,
+        COUNT(CASE WHEN f_all.DateReceived >= date_sub(WEEK, 1, now()) THEN 1 END) as totalThisWeek,
+        COUNT(CASE WHEN f_all.DateReceived >= date_sub(MONTH, 1, now()) THEN 1 END) as totalThisMonth
+      FROM patients_with_doctor pwd
+      JOIN FactGeneticTestResult f_all ON pwd.PatientKey = f_all.PatientKey
+    `;
+
+    // Tests by type (ALL tests from patients that belong to current doctor, filtered by period)
     const testsByTypeQuery = `
+      WITH patients_with_doctor AS (
+        ${patientsWithDoctorQuery}
+      )
       SELECT 
         t.TestCategory as testCategory,
         COUNT(*) as count
-      FROM FactGeneticTestResult f
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      LEFT JOIN DimTest t ON f.TestKey = t.TestKey
-      WHERE pr.DoctorId = {doctorId:UInt32} AND ${dateCondition}
+      FROM patients_with_doctor pwd
+      JOIN FactGeneticTestResult f_all ON pwd.PatientKey = f_all.PatientKey
+      LEFT JOIN DimTest t ON f_all.TestKey = t.TestKey
+      WHERE ${dateCondition}
       GROUP BY t.TestCategory
       ORDER BY count DESC
       LIMIT 10
     `;
 
-    // Top diagnoses
+    // Top diagnoses (ALL tests from patients that belong to current doctor, filtered by period)
     const topDiagnosesQuery = `
+      WITH patients_with_doctor AS (
+        ${patientsWithDoctorQuery}
+      )
       SELECT 
         d.DiagnosisDescription as diagnosis,
         COUNT(*) as count
-      FROM FactGeneticTestResult f
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
-      WHERE pr.DoctorId = {doctorId:UInt32} AND ${dateCondition}
+      FROM patients_with_doctor pwd
+      JOIN FactGeneticTestResult f_all ON pwd.PatientKey = f_all.PatientKey
+      LEFT JOIN DimDiagnosis d ON f_all.DiagnosisKey = d.DiagnosisKey
+      WHERE ${dateCondition}
         AND d.DiagnosisDescription IS NOT NULL
       GROUP BY d.DiagnosisDescription
       ORDER BY count DESC
