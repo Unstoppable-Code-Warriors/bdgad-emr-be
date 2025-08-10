@@ -19,15 +19,15 @@ import { HealthController } from './health.controller';
             delayMs: 2000,
           },
         },
-        clickhouse: {
-          transport: 'sse',
-          url: 'http://localhost:9999/mcp',
-          reconnect: {
-            enabled: true,
-            maxAttempts: 5,
-            delayMs: 2000,
-          },
-        },
+        // clickhouse: {
+        //   transport: 'sse',
+        //   url: 'http://localhost:9999/mcp',
+        //   reconnect: {
+        //     enabled: true,
+        //     maxAttempts: 5,
+        //     delayMs: 2000,
+        //   },
+        // },
       },
     }),
   ],
