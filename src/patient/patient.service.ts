@@ -58,8 +58,16 @@ export class PatientService {
       sortOrder,
     });
 
-    // Build WHERE conditions for filtering patients
-    const filterConditions = ['pr.DoctorId = {doctorId:UInt32}'];
+    // First, get all patients that have at least one test with current doctor
+    const patientsWithDoctorQuery = `
+      SELECT DISTINCT f.PatientKey
+      FROM FactGeneticTestResult f
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      WHERE pr.DoctorId = {doctorId:UInt32}
+    `;
+
+    // Build WHERE conditions for filtering patients (excluding doctor filter)
+    const filterConditions: string[] = [];
     const queryParams: Record<string, any> = { doctorId };
 
     console.log('Building filter conditions...');
@@ -77,13 +85,13 @@ export class PatientService {
     }
 
     if (searchDto.dateFrom) {
-      filterConditions.push('f.DateReceived >= {dateFrom:DateTime}');
+      filterConditions.push('f_filter.DateReceived >= {dateFrom:DateTime}');
       queryParams.dateFrom = searchDto.dateFrom;
       console.log('Added dateFrom filter:', queryParams.dateFrom);
     }
 
     if (searchDto.dateTo) {
-      filterConditions.push('f.DateReceived <= {dateTo:DateTime}');
+      filterConditions.push('f_filter.DateReceived <= {dateTo:DateTime}');
       queryParams.dateTo = searchDto.dateTo;
       console.log('Added dateTo filter:', queryParams.dateTo);
     }
@@ -100,8 +108,13 @@ export class PatientService {
       console.log('Added diagnosis filter:', queryParams.diagnosis);
     }
 
-    const filterWhereClause = filterConditions.join(' AND ');
-    console.log('Final filter conditions:', filterWhereClause);
+    // Build additional filter WHERE clause
+    const additionalFilters =
+      filterConditions.length > 0
+        ? `AND ${filterConditions.join(' AND ')}`
+        : '';
+
+    console.log('Additional filters:', additionalFilters);
     console.log('Query parameters:', JSON.stringify(queryParams));
 
     // Build ORDER BY clause
@@ -122,19 +135,12 @@ export class PatientService {
 
     console.log('Order by clause:', orderByClause);
 
-    // Main query to get patients
-    // Use CTE to first filter patients that match criteria, then get all their test data
+    // Main query: Get patients that belong to doctor and match filters
     const searchQuery = `
-      WITH filtered_patients AS (
-        SELECT DISTINCT f.PatientKey as PatientKey
-        FROM FactGeneticTestResult f
-        JOIN DimPatient p ON f.PatientKey = p.PatientKey AND p.IsCurrent = true
-        JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-        LEFT JOIN DimTest t ON f.TestKey = t.TestKey
-        LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
-        WHERE ${filterWhereClause}
+      WITH patients_with_doctor AS (
+        ${patientsWithDoctorQuery}
       ),
-      patient_doctor_info AS (
+      doctor_info AS (
         SELECT DISTINCT 
           f.PatientKey,
           pr.DoctorName
@@ -151,29 +157,47 @@ export class PatientService {
         p.Address as address,
         MAX(f_all.DateReceived) as lastTestDate,
         COUNT(f_all.TestKey) as totalTests,
-        pdi.DoctorName as doctorName
-      FROM filtered_patients fp
-      JOIN FactGeneticTestResult f_all ON fp.PatientKey = f_all.PatientKey
-      JOIN DimPatient p ON f_all.PatientKey = p.PatientKey AND p.IsCurrent = true
-      JOIN patient_doctor_info pdi ON fp.PatientKey = pdi.PatientKey
-      -- Remove the WHERE clause that limits to current doctor only
-      -- This allows counting ALL tests for the patient, not just with current doctor
+        di.DoctorName as doctorName
+      FROM patients_with_doctor pwd
+      JOIN DimPatient p ON pwd.PatientKey = p.PatientKey AND p.IsCurrent = true
+      JOIN FactGeneticTestResult f_all ON pwd.PatientKey = f_all.PatientKey
+      JOIN doctor_info di ON pwd.PatientKey = di.PatientKey
+      ${
+        filterConditions.length > 0
+          ? `
+      -- Apply additional filters if any
+      JOIN FactGeneticTestResult f_filter ON pwd.PatientKey = f_filter.PatientKey
+      LEFT JOIN DimTest t ON f_filter.TestKey = t.TestKey
+      LEFT JOIN DimDiagnosis d ON f_filter.DiagnosisKey = d.DiagnosisKey
+      `
+          : ''
+      }
+      WHERE 1=1 ${additionalFilters}
       GROUP BY 
         p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, 
-        p.Barcode, p.Address, pdi.DoctorName
+        p.Barcode, p.Address, di.DoctorName
       ORDER BY ${orderByClause}
       LIMIT {limit:UInt32} OFFSET {offset:UInt32}
     `;
 
     // Count query for pagination
     const countQuery = `
+      WITH patients_with_doctor AS (
+        ${patientsWithDoctorQuery}
+      )
       SELECT COUNT(DISTINCT p.PatientKey) as total
-      FROM FactGeneticTestResult f
-      JOIN DimPatient p ON f.PatientKey = p.PatientKey AND p.IsCurrent = true
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      LEFT JOIN DimTest t ON f.TestKey = t.TestKey
-      LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
-      WHERE ${filterWhereClause}
+      FROM patients_with_doctor pwd
+      JOIN DimPatient p ON pwd.PatientKey = p.PatientKey AND p.IsCurrent = true
+      ${
+        filterConditions.length > 0
+          ? `
+      JOIN FactGeneticTestResult f_filter ON pwd.PatientKey = f_filter.PatientKey
+      LEFT JOIN DimTest t ON f_filter.TestKey = t.TestKey
+      LEFT JOIN DimDiagnosis d ON f_filter.DiagnosisKey = d.DiagnosisKey
+      `
+          : ''
+      }
+      WHERE 1=1 ${additionalFilters}
     `;
 
     queryParams.limit = limit;
@@ -239,7 +263,7 @@ export class PatientService {
         message: error.message,
         stack: error.stack,
         queryParams: JSON.stringify(queryParams),
-        filterWhereClause,
+        additionalFilters,
       });
       console.error('=== PatientService.searchPatients ERROR END ===');
       throw error;
