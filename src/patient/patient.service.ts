@@ -133,6 +133,14 @@ export class PatientService {
         LEFT JOIN DimTest t ON f.TestKey = t.TestKey
         LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
         WHERE ${filterWhereClause}
+      ),
+      patient_doctor_info AS (
+        SELECT DISTINCT 
+          f.PatientKey,
+          pr.DoctorName
+        FROM FactGeneticTestResult f
+        JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+        WHERE pr.DoctorId = {doctorId:UInt32}
       )
       SELECT DISTINCT
         p.PatientKey as patientKey,
@@ -143,15 +151,16 @@ export class PatientService {
         p.Address as address,
         MAX(f_all.DateReceived) as lastTestDate,
         COUNT(f_all.TestKey) as totalTests,
-        pr.DoctorName as doctorName
+        pdi.DoctorName as doctorName
       FROM filtered_patients fp
       JOIN FactGeneticTestResult f_all ON fp.PatientKey = f_all.PatientKey
       JOIN DimPatient p ON f_all.PatientKey = p.PatientKey AND p.IsCurrent = true
-      JOIN DimProvider pr ON f_all.ProviderKey = pr.ProviderKey
-      WHERE pr.DoctorId = {doctorId:UInt32}
+      JOIN patient_doctor_info pdi ON fp.PatientKey = pdi.PatientKey
+      -- Remove the WHERE clause that limits to current doctor only
+      -- This allows counting ALL tests for the patient, not just with current doctor
       GROUP BY 
         p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, 
-        p.Barcode, p.Address, pr.DoctorName
+        p.Barcode, p.Address, pdi.DoctorName
       ORDER BY ${orderByClause}
       LIMIT {limit:UInt32} OFFSET {offset:UInt32}
     `;
@@ -262,28 +271,38 @@ export class PatientService {
     }
 
     // Get patient basic info
-    const patientQuery = `
-      SELECT DISTINCT
+    const patientInfoQuery = `
+      SELECT 
         p.PatientKey as patientKey,
         p.PatientSourceID as patientSourceId,
         p.FullName as fullName,
         p.DateOfBirth as dateOfBirth,
         p.Gender as gender,
         p.Barcode as barcode,
-        p.Address as address,
-        MAX(f.DateReceived) as lastTestDate,
-        COUNT(f.TestKey) as totalTests,
-        pr.DoctorName as doctorName
-      FROM FactGeneticTestResult f
-      JOIN DimPatient p ON f.PatientKey = p.PatientKey AND p.IsCurrent = true
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      WHERE p.PatientKey = {patientKey:UInt64} AND pr.DoctorId = {doctorId:UInt32}
-      GROUP BY 
-        p.PatientKey, p.PatientSourceID, p.FullName, p.DateOfBirth, 
-        p.Gender, p.Barcode, p.Address, pr.DoctorName
+        p.Address as address
+      FROM DimPatient p
+      WHERE p.PatientKey = {patientKey:UInt64} AND p.IsCurrent = true
     `;
 
-    // Get recent test results (last 5)
+    // Get patient test statistics from ALL tests
+    const patientStatsQuery = `
+      SELECT 
+        MAX(DateReceived) as lastTestDate,
+        COUNT(TestKey) as totalTests
+      FROM FactGeneticTestResult
+      WHERE PatientKey = {patientKey:UInt64}
+    `;
+
+    // Get doctor name for current doctor
+    const doctorNameQuery = `
+      SELECT DISTINCT pr.DoctorName
+      FROM FactGeneticTestResult f
+      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      WHERE f.PatientKey = {patientKey:UInt64} AND pr.DoctorId = {doctorId:UInt32}
+      LIMIT 1
+    `;
+
+    // Get recent test results (last 5) from ALL tests, not just current doctor
     const recentTestsQuery = `
       SELECT
         f.TestKey as testKey,
@@ -299,21 +318,31 @@ export class PatientService {
       LEFT JOIN DimDate dd ON f.DateReportedKey = dd.DateKey
       LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
       LEFT JOIN DimVariant v ON f.VariantKey = v.VariantKey
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      WHERE f.PatientKey = {patientKey:UInt64} AND pr.DoctorId = {doctorId:UInt32}
+      WHERE f.PatientKey = {patientKey:UInt64}
       ORDER BY f.DateReceived DESC
       LIMIT 5
     `;
 
     try {
-      const [patientResult, recentTestsResult] = await Promise.all([
-        this.clickhouseService.query(patientQuery, {
+      const [
+        patientResult,
+        patientStatsResult,
+        doctorNameResult,
+        recentTestsResult,
+      ] = await Promise.all([
+        this.clickhouseService.query(patientInfoQuery, {
+          patientKey,
+        }) as Promise<ClickHouseQueryResult>,
+        this.clickhouseService.query(patientStatsQuery, {
+          patientKey,
+        }) as Promise<ClickHouseQueryResult>,
+        this.clickhouseService.query(doctorNameQuery, {
           patientKey,
           doctorId,
         }) as Promise<ClickHouseQueryResult>,
         this.clickhouseService.query(recentTestsQuery, {
           patientKey,
-          doctorId,
+          // Remove doctorId since recentTestsQuery now gets ALL tests
         }) as Promise<ClickHouseQueryResult>,
       ]);
 
@@ -324,10 +353,21 @@ export class PatientService {
         throw new NotFoundException('Patient not found');
       }
 
+      const patientStats = patientStatsResult.data[0] as {
+        lastTestDate: string;
+        totalTests: number;
+      };
+
+      const doctorName = (doctorNameResult.data[0] as { DoctorName: string })
+        ?.DoctorName;
+
       const recentTests = recentTestsResult.data as TestResult[];
 
       return {
         ...patientData,
+        lastTestDate: patientStats.lastTestDate,
+        totalTests: patientStats.totalTests,
+        doctorName: doctorName,
         recentTests,
         testHistory: [], // Will be loaded separately if needed
       };
@@ -338,7 +378,7 @@ export class PatientService {
   }
 
   async getPatientTestHistory(patientKey: number, doctorId: number) {
-    // Verify ownership first
+    // Verify ownership first - patient must have at least one visit with this doctor
     const ownershipQuery = `
       SELECT COUNT(*) as count
       FROM FactGeneticTestResult f
@@ -358,6 +398,7 @@ export class PatientService {
       throw new NotFoundException('Patient not found or access denied');
     }
 
+    // Get ALL test history for this patient (not just with current doctor)
     const historyQuery = `
       SELECT
         f.TestKey as testKey,
@@ -368,15 +409,15 @@ export class PatientService {
         'completed' as status
       FROM FactGeneticTestResult f
       LEFT JOIN DimTest t ON f.TestKey = t.TestKey
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      WHERE f.PatientKey = {patientKey:UInt64} AND pr.DoctorId = {doctorId:UInt32}
+      LEFT JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+      WHERE f.PatientKey = {patientKey:UInt64}
       ORDER BY f.DateReceived DESC
     `;
 
     try {
       const result = (await this.clickhouseService.query(historyQuery, {
         patientKey,
-        doctorId,
+        // Remove doctorId parameter since we want all history
       })) as ClickHouseQueryResult;
 
       return result.data;
