@@ -50,9 +50,6 @@ import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { ConfigService } from '@nestjs/config';
 import { DEFAULT_MODEL } from '../ai-chat/constants/models';
 
-type CreateReactAgentInput = Parameters<typeof createReactAgent>[0];
-type AgentTools = CreateReactAgentInput extends { tools: infer T } ? T : never;
-
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);

@@ -9,6 +9,7 @@ import {
   ValidationPipe,
   UsePipes,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { Observable } from 'rxjs';
@@ -17,14 +18,17 @@ import {
   ChatCompletionRequest,
   ChatCompletionResponse,
 } from './dto/chat-completion.dto';
+import { AuthGuard, User, UserInfo } from '../auth';
 
 @Controller('chat')
+@UseGuards(AuthGuard)
 export class AiChatController {
   constructor(private readonly aiChatService: AiChatService) {}
 
   @Post('completions')
   @HttpCode(200)
   async createChatCompletion(
+    @User() user: UserInfo,
     @Body(new ValidationPipe({ transform: true }))
     request: ChatCompletionRequest,
     @Res() res: Response,
@@ -37,8 +41,10 @@ export class AiChatController {
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('Transfer-Encoding', 'chunked');
 
-      const streamObservable =
-        this.aiChatService.createStreamingCompletionRaw(request);
+      const streamObservable = this.aiChatService.createStreamingCompletionRaw(
+        request,
+        user.id,
+      );
 
       streamObservable.subscribe({
         next: (chunk) => {
@@ -57,7 +63,10 @@ export class AiChatController {
     } else {
       // Handle non-streaming response
       try {
-        const completion = await this.aiChatService.createCompletion(request);
+        const completion = await this.aiChatService.createCompletion(
+          request,
+          user.id,
+        );
         res.json(completion);
       } catch (error) {
         res.status(500).json({
@@ -73,7 +82,10 @@ export class AiChatController {
   // Alternative SSE endpoint for clients that prefer the NestJS SSE pattern
   @Sse('stream')
   @UsePipes(new ValidationPipe({ transform: true }))
-  streamChat(@Query() query: any): Observable<MessageEvent> {
+  streamChat(
+    @User() user: UserInfo,
+    @Query() query: any,
+  ): Observable<MessageEvent> {
     // For this endpoint, you'd pass the request as query parameters
     // This is more "NestJS-like" but less OpenAI-compatible
     const request: ChatCompletionRequest = {
@@ -82,6 +94,6 @@ export class AiChatController {
       stream: true,
     };
 
-    return this.aiChatService.createStreamingCompletion(request);
+    return this.aiChatService.createStreamingCompletion(request, user.id);
   }
 }

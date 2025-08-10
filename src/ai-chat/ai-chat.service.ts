@@ -4,7 +4,7 @@ import { map } from 'rxjs/operators';
 import { MessageEvent } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { AiService } from '../ai/ai.service';
-import { SYSTEM_PROMPT } from './constants/prompt';
+import { createSystemMessages } from './constants/prompt';
 import { DEFAULT_MODEL } from './constants/models';
 import {
   ChatCompletionRequest,
@@ -22,6 +22,7 @@ export class AiChatService {
 
   async createCompletion(
     request: ChatCompletionRequest,
+    doctorId: number,
   ): Promise<ChatCompletionResponse> {
     const startTime = Date.now();
     const completionId = `chatcmpl-${uuidv4()}`;
@@ -30,7 +31,10 @@ export class AiChatService {
       const agent = await this.aiService.getAgent();
 
       // Convert messages to LangChain format and add system prompt if not present
-      const messages = this.convertMessagesToLangChain(request.messages);
+      const messages = this.convertMessagesToLangChain(
+        request.messages,
+        doctorId,
+      );
 
       // Invoke the agent
       const result = await agent.invoke({
@@ -75,7 +79,7 @@ export class AiChatService {
       };
 
       this.logger.log(
-        `Completion created with ID: ${completionId}, using internal model: ${DEFAULT_MODEL}, response model: ${response.model}`,
+        `Completion created with ID: ${completionId}, using internal model: ${DEFAULT_MODEL}, response model: ${response.model}, doctor ID: ${doctorId}`,
       );
       return response;
     } catch (error) {
@@ -86,8 +90,9 @@ export class AiChatService {
 
   createStreamingCompletion(
     request: ChatCompletionRequest,
+    doctorId: number,
   ): Observable<MessageEvent> {
-    return this.createStreamingCompletionRaw(request).pipe(
+    return this.createStreamingCompletionRaw(request, doctorId).pipe(
       map(
         (chunk: ChatCompletionStreamResponse): MessageEvent => ({
           data: chunk,
@@ -99,6 +104,7 @@ export class AiChatService {
 
   createStreamingCompletionRaw(
     request: ChatCompletionRequest,
+    doctorId: number,
   ): Observable<ChatCompletionStreamResponse> {
     return new Observable<ChatCompletionStreamResponse>((subscriber) => {
       const startTime = Date.now();
@@ -106,7 +112,7 @@ export class AiChatService {
       const responseModel = request.model || 'gpt-4o-mini'; // Keep request model for API compatibility
 
       this.logger.log(
-        `Starting streaming completion with ID: ${completionId}, using internal model: ${DEFAULT_MODEL}, response model: ${responseModel}`,
+        `Starting streaming completion with ID: ${completionId}, using internal model: ${DEFAULT_MODEL}, response model: ${responseModel}, doctor ID: ${doctorId}`,
       );
 
       (async () => {
@@ -114,7 +120,10 @@ export class AiChatService {
           const agent = await this.aiService.getAgent();
 
           // Convert messages to LangChain format
-          const messages = this.convertMessagesToLangChain(request.messages);
+          const messages = this.convertMessagesToLangChain(
+            request.messages,
+            doctorId,
+          );
 
           // For streaming, we'll need to handle the agent's streaming response
           // Since LangGraph doesn't directly support streaming in the same way as OpenAI,
@@ -234,18 +243,20 @@ export class AiChatService {
     }, 100); // 100ms delay between chunks for realistic streaming feel
   }
 
-  private convertMessagesToLangChain(messages: ChatMessage[]) {
-    // Add system prompt if not present
+  private convertMessagesToLangChain(
+    messages: ChatMessage[],
+    doctorId: number,
+  ) {
+    // Check if system messages are already present
     const hasSystemMessage = messages.some(
       (m) => m.role === MessageRole.SYSTEM,
     );
     const langChainMessages: any[] = [];
 
     if (!hasSystemMessage) {
-      langChainMessages.push({
-        role: 'system',
-        content: SYSTEM_PROMPT,
-      });
+      // Add both general and doctor-specific system messages
+      const systemMessages = createSystemMessages(doctorId);
+      langChainMessages.push(...systemMessages);
     }
 
     // Convert OpenAI format to LangChain format
@@ -258,7 +269,9 @@ export class AiChatService {
     );
 
     // Note: We always use DEFAULT_MODEL internally, regardless of request.model
-    this.logger.debug(`Using internal model: ${DEFAULT_MODEL} for processing`);
+    this.logger.debug(
+      `Using internal model: ${DEFAULT_MODEL} for processing with doctor ID: ${doctorId}`,
+    );
 
     return langChainMessages;
   }
