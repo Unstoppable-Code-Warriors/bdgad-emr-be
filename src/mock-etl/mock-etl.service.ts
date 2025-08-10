@@ -9,6 +9,7 @@ export class MockEtlService {
   sendMockEtl(body: MockEtlReqDto) {
     this.etlClient.emit('result', {
       ...body,
+      complete_time: new Date().toISOString(),
       resultS3Url: 's3://etl-results/mock-output.zip',
     });
     return {
