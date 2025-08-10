@@ -70,6 +70,8 @@ describe('PatientController', () => {
         variantName: 'Variant A',
         clinicalSignificance: 'Benign',
         location: 'bdgad',
+        resultEtlUrl:
+          'https://d46919b3b31b61ac349836b18c9ac671.r2.cloudflarestorage.com/results/patient-1/test-1.pdf',
       },
     ],
     testHistory: [],
@@ -82,8 +84,10 @@ describe('PatientController', () => {
       dateReceived: '2024-01-15',
       doctorName: 'Dr. Smith',
       clinicName: 'Test Clinic',
-      status: 'completed',
+      status: 'completed' as const,
       location: 'bdgad',
+      resultEtlUrl:
+        'https://d46919b3b31b61ac349836b18c9ac671.r2.cloudflarestorage.com/results/patient-1/test-1.pdf',
     },
   ];
 
