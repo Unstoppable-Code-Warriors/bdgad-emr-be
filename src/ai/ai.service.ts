@@ -309,7 +309,7 @@ export class AiService {
         test_name: testName,
         machine: getRandomElement(MEDICAL_MACHINES),
         taken_by: {
-          id: uuidv4(),
+          id: Math.floor(Math.random() * 1000000) + 1,
           name: getRandomElement(TECHNICIAN_NAMES),
         },
         notes: getRandomElement(TEST_NOTES),
@@ -488,7 +488,7 @@ export class AiService {
           test_name: 'Công thức máu toàn bộ',
           machine: 'Sysmex XN-1000',
           taken_by: {
-            id: uuidv4(),
+            id: Math.floor(Math.random() * 1000000) + 1,
             name: 'Nguyễn Văn Bình',
           },
           results: [
