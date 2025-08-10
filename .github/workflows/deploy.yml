@@ -67,8 +67,22 @@ jobs:
               source ${{ secrets.MCP_ENV_PATH }}
               set +a
             fi
+
+            echo "Installing dependencies (this may take a while on first run)..."
+            timeout 300 uv run --with mcp-clickhouse --python 3.10 --help > /dev/null 2>&1 || echo "Pre-installation completed or timed out"
+
+            echo "Starting MCP server..."
             nohup uv run --with mcp-clickhouse --python 3.10 mcp-clickhouse > /tmp/mcp-clickhouse.log 2>&1 &
-            sleep 5
+
+            echo "Waiting for MCP server to start (up to 30 seconds)..."
+            for i in {1..30}; do
+              if curl -s http://localhost:9999/health > /dev/null 2>&1; then
+                echo "MCP server is ready!"
+                break
+              fi
+              echo "Waiting... ($i/30)"
+              sleep 1
+            done
 
             echo "Checking ClickHouse MCP server health..."
             curl -f http://localhost:9999/health || echo "MCP server health check failed"
