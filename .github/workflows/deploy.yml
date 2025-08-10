@@ -8,6 +8,7 @@ on:
 env:
   DOCKER_IMAGE: ${{ secrets.DOCKER_USERNAME }}/${{ vars.SERVICE_NAME }}
   SERVICE_NAME: ${{ vars.SERVICE_NAME }}
+  SYSTEM_PROMPT: ${{ vars.SYSTEM_PROMPT }}
 
 jobs:
   build:
@@ -62,6 +63,7 @@ jobs:
             docker run -d \
               --name ${{ env.SERVICE_NAME }} \
               --env-file ${{ secrets.ENV_PATH }} \
+              -e SYSTEM_PROMPT="${{ env.SYSTEM_PROMPT }}" \
               -p ${{ vars.SERVICE_PORT }}:${{ vars.SERVICE_PORT }} \
               --restart unless-stopped \
               ${{ env.DOCKER_IMAGE }}:latest

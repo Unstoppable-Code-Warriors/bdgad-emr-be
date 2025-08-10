@@ -17,4 +17,11 @@ export const envValidationSchema = Joi.object({
 
   // RabbitMQ configuration
   RABBITMQ_URL: Joi.string().required(),
+
+  // OpenAI configuration
+  OPENAI_API_URL: Joi.string().default('https://api.openai.com/v1'),
+  OPENAI_API_KEY: Joi.string().required(),
+
+  // AI Chat configuration
+  SYSTEM_PROMPT: Joi.string().optional(),
 });
