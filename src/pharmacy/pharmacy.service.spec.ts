@@ -26,7 +26,7 @@ describe('PharmacyService', () => {
     },
     medical_record: {
       doctor: {
-        id: '7',
+        id: 7,
         name: 'Dr. Test',
       },
     },
