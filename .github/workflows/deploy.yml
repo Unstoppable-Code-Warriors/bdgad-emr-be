@@ -37,9 +37,45 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy:
+  deploy-mcp:
     runs-on: ubuntu-latest
     needs: build
+
+    steps:
+      - name: Deploy ClickHouse MCP Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "Checking if uv is installed..."
+            if ! command -v uv &> /dev/null; then
+              echo "Installing uv..."
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              source $HOME/.cargo/env
+            else
+              echo "uv is already installed"
+            fi
+
+            echo "Stopping existing ClickHouse MCP server..."
+            pkill -f "mcp-clickhouse" || true
+
+            echo "Starting ClickHouse MCP server..."
+            if [ -f "${{ secrets.MCP_ENV_PATH }}" ]; then
+              set -a
+              source ${{ secrets.MCP_ENV_PATH }}
+              set +a
+            fi
+            nohup uv run --with mcp-clickhouse --python 3.10 mcp-clickhouse > /tmp/mcp-clickhouse.log 2>&1 &
+            sleep 5
+
+            echo "Checking ClickHouse MCP server health..."
+            curl -f http://localhost:9999/health || echo "MCP server health check failed"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build, deploy-mcp]
 
     steps:
       - name: Deploy to server
@@ -64,6 +100,7 @@ jobs:
               --name ${{ env.SERVICE_NAME }} \
               --env-file ${{ secrets.ENV_PATH }} \
               -e SYSTEM_PROMPT="${{ env.SYSTEM_PROMPT }}" \
+              --add-host=host.docker.internal:host-gateway \
               -p ${{ vars.SERVICE_PORT }}:${{ vars.SERVICE_PORT }} \
               --restart unless-stopped \
               ${{ env.DOCKER_IMAGE }}:latest
