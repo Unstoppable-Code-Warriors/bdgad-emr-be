@@ -36,6 +36,12 @@ export class PatientService {
     doctorId: number,
     searchDto: PatientSearchDto,
   ): Promise<PatientSearchResponse> {
+    console.log('=== PatientService.searchPatients START ===');
+    console.log('Input parameters:', {
+      doctorId,
+      searchDto: JSON.stringify(searchDto),
+    });
+
     const {
       page = 1,
       limit = 20,
@@ -44,41 +50,59 @@ export class PatientService {
     } = searchDto;
     const offset = (page - 1) * limit;
 
+    console.log('Pagination settings:', {
+      page,
+      limit,
+      offset,
+      sortBy,
+      sortOrder,
+    });
+
     // Build WHERE conditions for filtering patients
     const filterConditions = ['pr.DoctorId = {doctorId:UInt32}'];
     const queryParams: Record<string, any> = { doctorId };
 
+    console.log('Building filter conditions...');
+
     if (searchDto.name) {
       filterConditions.push('p.FullName ILIKE {name:String}');
       queryParams.name = `%${searchDto.name}%`;
+      console.log('Added name filter:', queryParams.name);
     }
 
     if (searchDto.barcode) {
       filterConditions.push('p.Barcode = {barcode:String}');
       queryParams.barcode = searchDto.barcode;
+      console.log('Added barcode filter:', queryParams.barcode);
     }
 
     if (searchDto.dateFrom) {
       filterConditions.push('f.DateReceived >= {dateFrom:DateTime}');
       queryParams.dateFrom = searchDto.dateFrom;
+      console.log('Added dateFrom filter:', queryParams.dateFrom);
     }
 
     if (searchDto.dateTo) {
       filterConditions.push('f.DateReceived <= {dateTo:DateTime}');
       queryParams.dateTo = searchDto.dateTo;
+      console.log('Added dateTo filter:', queryParams.dateTo);
     }
 
     if (searchDto.testType) {
       filterConditions.push('t.TestCategory = {testType:String}');
       queryParams.testType = searchDto.testType;
+      console.log('Added testType filter:', queryParams.testType);
     }
 
     if (searchDto.diagnosis) {
       filterConditions.push('d.DiagnosisDescription ILIKE {diagnosis:String}');
       queryParams.diagnosis = `%${searchDto.diagnosis}%`;
+      console.log('Added diagnosis filter:', queryParams.diagnosis);
     }
 
     const filterWhereClause = filterConditions.join(' AND ');
+    console.log('Final filter conditions:', filterWhereClause);
+    console.log('Query parameters:', JSON.stringify(queryParams));
 
     // Build ORDER BY clause
     let orderByClause = '';
@@ -95,6 +119,8 @@ export class PatientService {
       default:
         orderByClause = `lastTestDate ${sortOrder}`;
     }
+
+    console.log('Order by clause:', orderByClause);
 
     // Main query to get patients
     // Use CTE to first filter patients that match criteria, then get all their test data
@@ -144,7 +170,14 @@ export class PatientService {
     queryParams.limit = limit;
     queryParams.offset = offset;
 
+    console.log('Executing queries...');
+    console.log('Search query:', searchQuery);
+    console.log('Count query:', countQuery);
+    console.log('Final query parameters:', JSON.stringify(queryParams));
+
     try {
+      const startTime = Date.now();
+
       const [searchResult, countResult] = await Promise.all([
         this.clickhouseService.query(
           searchQuery,
@@ -156,11 +189,21 @@ export class PatientService {
         ) as Promise<ClickHouseQueryResult>,
       ]);
 
+      const executionTime = Date.now() - startTime;
+      console.log(`Queries executed successfully in ${executionTime}ms`);
+
       const patients = searchResult.data as PatientSummary[];
       const total = (countResult.data[0] as CountResult)?.total || 0;
       const totalPages = Math.ceil(total / limit);
 
-      return {
+      console.log('Query results:', {
+        patientsFound: patients.length,
+        totalRecords: total,
+        totalPages,
+        currentPage: page,
+      });
+
+      const response = {
         data: patients,
         pagination: {
           page,
@@ -171,8 +214,25 @@ export class PatientService {
           hasPrev: page > 1,
         },
       };
+
+      console.log('Search response prepared:', {
+        dataCount: response.data.length,
+        pagination: response.pagination,
+      });
+
+      console.log('=== PatientService.searchPatients END ===');
+
+      return response;
     } catch (error) {
+      console.error('=== PatientService.searchPatients ERROR ===');
       console.error('Error searching patients:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        queryParams: JSON.stringify(queryParams),
+        filterWhereClause,
+      });
+      console.error('=== PatientService.searchPatients ERROR END ===');
       throw error;
     }
   }
