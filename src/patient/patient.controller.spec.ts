@@ -69,6 +69,7 @@ describe('PatientController', () => {
         diagnosis: 'Normal',
         variantName: 'Variant A',
         clinicalSignificance: 'Benign',
+        location: 'bdgad',
       },
     ],
     testHistory: [],
@@ -82,6 +83,7 @@ describe('PatientController', () => {
       doctorName: 'Dr. Smith',
       clinicName: 'Test Clinic',
       status: 'completed',
+      location: 'bdgad',
     },
   ];
 
