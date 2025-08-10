@@ -25,6 +25,7 @@ export interface TestResult {
   diagnosis: string | null;
   variantName: string | null;
   clinicalSignificance: string | null;
+  location: string | null; // 'pharmacy' or 'bdgad'
 }
 
 export interface TestHistoryItem {
@@ -34,6 +35,7 @@ export interface TestHistoryItem {
   doctorName: string;
   clinicName: string;
   status: 'completed' | 'pending' | 'cancelled';
+  location: string | null; // 'pharmacy' or 'bdgad'
 }
 
 export interface PatientSearchResponse {

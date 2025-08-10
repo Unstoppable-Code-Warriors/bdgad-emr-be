@@ -336,7 +336,8 @@ export class PatientService {
         dd.FullDate as dateReported,
         d.DiagnosisDescription as diagnosis,
         v.VariantName as variantName,
-        v.ClinicalSignificance as clinicalSignificance
+        v.ClinicalSignificance as clinicalSignificance,
+        f.Location as location
       FROM FactGeneticTestResult f
       LEFT JOIN DimTest t ON f.TestKey = t.TestKey
       LEFT JOIN DimDate dd ON f.DateReportedKey = dd.DateKey
@@ -430,7 +431,8 @@ export class PatientService {
         f.DateReceived as dateReceived,
         pr.DoctorName as doctorName,
         pr.ClinicName as clinicName,
-        'completed' as status
+        'completed' as status,
+        f.Location as location
       FROM FactGeneticTestResult f
       LEFT JOIN DimTest t ON f.TestKey = t.TestKey
       LEFT JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
