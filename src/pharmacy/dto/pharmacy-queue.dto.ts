@@ -78,8 +78,8 @@ export class PatientDto {
 
 export class DoctorDto {
   @IsOptional()
-  @IsString()
-  id?: string;
+  @IsNumber()
+  id?: number;
 
   @IsOptional()
   @IsString()
