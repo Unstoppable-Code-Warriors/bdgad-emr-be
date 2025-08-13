@@ -84,7 +84,31 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
         query_params: params,
       });
 
-      return await result.json();
+      // Get the response text first
+      const responseText = await result.text();
+
+      // If the response is empty or contains only whitespace, return empty data
+      if (!responseText || responseText.trim() === '') {
+        return { data: [] };
+      }
+
+      // Try to parse as JSON, if it fails, return the text response
+      try {
+        return JSON.parse(responseText);
+      } catch (jsonError) {
+        // If it's not valid JSON, check if it's an operation result
+        // UPDATE/ALTER operations typically return simple text responses
+        if (
+          responseText.includes('Ok.') ||
+          responseText.trim() === '0' ||
+          responseText.trim() === '1'
+        ) {
+          return { data: [], success: true, result: responseText };
+        }
+
+        // For other cases, return the text as is
+        return { data: [], rawResponse: responseText };
+      }
     } catch (error) {
       console.error('ClickHouse query error:', error);
       throw error;

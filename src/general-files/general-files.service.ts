@@ -68,35 +68,27 @@ export class GeneralFilesService {
     const exists = existingCategory?.data?.length > 0;
 
     if (exists) {
-      // Update existing category
+      // For ClickHouse, we need to delete and re-insert for updates
+      // This is more reliable than ALTER TABLE UPDATE
       await this.clickHouseService.query(
-        `
-        ALTER TABLE categories 
-        UPDATE 
-          name = {name:String},
-          description = {description:String},
-          updated_at = now()
-        WHERE id = {categoryId:UInt32}
-      `,
-        {
-          categoryId: categoryData.id,
-          name: categoryData.name,
-          description: categoryData.description,
-        },
+        'DELETE FROM categories WHERE id = {categoryId:UInt32}',
+        { categoryId: categoryData.id },
       );
+    }
 
+    // Insert the category (whether new or replacement)
+    await this.clickHouseService.insert('categories', [
+      {
+        id: categoryData.id,
+        name: categoryData.name,
+        description: categoryData.description,
+      },
+    ]);
+
+    if (exists) {
       console.log(`Updated category ID: ${categoryData.id}`);
       return { updated: true, inserted: false };
     } else {
-      // Insert new category
-      await this.clickHouseService.insert('categories', [
-        {
-          id: categoryData.id,
-          name: categoryData.name,
-          description: categoryData.description,
-        },
-      ]);
-
       console.log(`Inserted new category ID: ${categoryData.id}`);
       return { updated: false, inserted: true };
     }
@@ -125,56 +117,33 @@ export class GeneralFilesService {
       .replace('T', ' ');
 
     if (exists) {
-      // Update existing file
+      // For ClickHouse, delete the existing record first
       await this.clickHouseService.query(
-        `
-        ALTER TABLE general_files 
-        UPDATE 
-          file_name = {fileName:String},
-          file_type = {fileType:String},
-          file_size = {fileSize:UInt64},
-          file_path = {filePath:String},
-          description = {description:String},
-          category_id = {categoryId:UInt32},
-          uploaded_by = {uploadedBy:UInt32},
-          uploaded_at = {uploadedAt:String},
-          send_emr_at = {sendEmrAt:String},
-          updated_at = now()
-        WHERE id = {fileId:UInt32}
-      `,
-        {
-          fileId: fileData.id,
-          fileName: fileData.fileName,
-          fileType: fileData.fileType,
-          fileSize: fileData.fileSize,
-          filePath: fileData.filePath,
-          description: fileData.description,
-          categoryId: fileData.categoryId,
-          uploadedBy: fileData.uploadedBy,
-          uploadedAt: uploadedAt,
-          sendEmrAt: sendEmrAt,
-        },
+        'DELETE FROM general_files WHERE id = {fileId:UInt32}',
+        { fileId: fileData.id },
       );
+    }
 
+    // Insert the file (whether new or replacement)
+    await this.clickHouseService.insert('general_files', [
+      {
+        id: fileData.id,
+        file_name: fileData.fileName,
+        file_type: fileData.fileType,
+        file_size: fileData.fileSize,
+        file_path: fileData.filePath,
+        description: fileData.description,
+        category_id: fileData.categoryId,
+        uploaded_by: fileData.uploadedBy,
+        uploaded_at: uploadedAt,
+        send_emr_at: sendEmrAt,
+      },
+    ]);
+
+    if (exists) {
       console.log(`Updated file ID: ${fileData.id}`);
       return { updated: true, inserted: false };
     } else {
-      // Insert new file
-      await this.clickHouseService.insert('general_files', [
-        {
-          id: fileData.id,
-          file_name: fileData.fileName,
-          file_type: fileData.fileType,
-          file_size: fileData.fileSize,
-          file_path: fileData.filePath,
-          description: fileData.description,
-          category_id: fileData.categoryId,
-          uploaded_by: fileData.uploadedBy,
-          uploaded_at: uploadedAt,
-          send_emr_at: sendEmrAt,
-        },
-      ]);
-
       console.log(`Inserted new file ID: ${fileData.id}`);
       return { updated: false, inserted: true };
     }
