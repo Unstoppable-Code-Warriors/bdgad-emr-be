@@ -16,12 +16,43 @@ import { DashboardStatsDto } from './dto/dashboard-stats.dto';
 export class PatientController {
   constructor(private readonly patientService: PatientService) {}
 
+  @Get('health')
+  async healthCheck() {
+    return { status: 'ok', timestamp: new Date().toISOString() };
+  }
+
   @Get('search')
   async searchPatients(
     @User() user: UserInfo,
     @Query() searchDto: PatientSearchDto,
   ) {
-    return this.patientService.searchPatients(user.id, searchDto);
+    console.log('=== PatientController.searchPatients START ===');
+    console.log('User info:', { userId: user.id });
+    console.log('Search DTO:', JSON.stringify(searchDto, null, 2));
+
+    if (!user.id || typeof user.id !== 'number') {
+      console.error('Invalid user ID:', user.id);
+      throw new Error('Invalid user authentication');
+    }
+
+    try {
+      const result = await this.patientService.searchPatients(
+        user.id,
+        searchDto,
+      );
+      console.log(
+        'Search completed successfully, returning',
+        result.data.length,
+        'patients',
+      );
+      console.log('=== PatientController.searchPatients END ===');
+      return result;
+    } catch (error) {
+      console.error('=== PatientController.searchPatients ERROR ===');
+      console.error('Error in controller:', error);
+      console.error('=== PatientController.searchPatients ERROR END ===');
+      throw error;
+    }
   }
 
   @Get('dashboard/stats')

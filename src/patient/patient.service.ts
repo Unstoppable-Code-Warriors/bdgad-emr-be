@@ -86,15 +86,31 @@ export class PatientService {
     }
 
     if (searchDto.dateFrom) {
-      filterConditions.push('f_filter.DateReceived >= {dateFrom:DateTime}');
-      queryParams.dateFrom = searchDto.dateFrom;
-      console.log('Added dateFrom filter:', queryParams.dateFrom);
+      try {
+        // Ensure date is in correct format for ClickHouse
+        const dateFrom = new Date(searchDto.dateFrom)
+          .toISOString()
+          .split('T')[0];
+        filterConditions.push('f_filter.DateReceived >= {dateFrom:Date}');
+        queryParams.dateFrom = dateFrom;
+        console.log('Added dateFrom filter:', queryParams.dateFrom);
+      } catch (error) {
+        console.error('Invalid dateFrom format:', searchDto.dateFrom);
+        throw new Error(`Invalid dateFrom format: ${searchDto.dateFrom}`);
+      }
     }
 
     if (searchDto.dateTo) {
-      filterConditions.push('f_filter.DateReceived <= {dateTo:DateTime}');
-      queryParams.dateTo = searchDto.dateTo;
-      console.log('Added dateTo filter:', queryParams.dateTo);
+      try {
+        // Ensure date is in correct format for ClickHouse
+        const dateTo = new Date(searchDto.dateTo).toISOString().split('T')[0];
+        filterConditions.push('f_filter.DateReceived <= {dateTo:Date}');
+        queryParams.dateTo = dateTo;
+        console.log('Added dateTo filter:', queryParams.dateTo);
+      } catch (error) {
+        console.error('Invalid dateTo format:', searchDto.dateTo);
+        throw new Error(`Invalid dateTo format: ${searchDto.dateTo}`);
+      }
     }
 
     if (searchDto.testType) {
@@ -222,19 +238,49 @@ export class PatientService {
     try {
       const startTime = Date.now();
 
-      const [searchResult, countResult] = await Promise.all([
-        this.clickhouseService.query(
-          searchQuery,
-          queryParams,
-        ) as Promise<ClickHouseQueryResult>,
-        this.clickhouseService.query(
-          countQuery,
-          queryParams,
-        ) as Promise<ClickHouseQueryResult>,
-      ]);
+      console.log(
+        'Executing search query with parameters:',
+        JSON.stringify(queryParams, null, 2),
+      );
+
+      let searchResult: ClickHouseQueryResult;
+      let countResult: ClickHouseQueryResult;
+
+      try {
+        [searchResult, countResult] = await Promise.all([
+          this.clickhouseService.query(
+            searchQuery,
+            queryParams,
+          ) as Promise<ClickHouseQueryResult>,
+          this.clickhouseService.query(
+            countQuery,
+            queryParams,
+          ) as Promise<ClickHouseQueryResult>,
+        ]);
+      } catch (queryError) {
+        console.error('ClickHouse query execution failed:');
+        console.error('Query error details:', {
+          message: queryError.message,
+          stack: queryError.stack,
+          searchQuery: searchQuery,
+          countQuery: countQuery,
+          queryParams: JSON.stringify(queryParams, null, 2),
+        });
+        throw new Error(`Database query failed: ${queryError.message}`);
+      }
 
       const executionTime = Date.now() - startTime;
       console.log(`Queries executed successfully in ${executionTime}ms`);
+
+      if (!searchResult || !searchResult.data) {
+        console.error('Search result is null or missing data:', searchResult);
+        throw new Error('Invalid search result from database');
+      }
+
+      if (!countResult || !countResult.data || !countResult.data[0]) {
+        console.error('Count result is null or missing data:', countResult);
+        throw new Error('Invalid count result from database');
+      }
 
       const patients = searchResult.data as PatientSummary[];
       const total = (countResult.data[0] as CountResult)?.total || 0;
