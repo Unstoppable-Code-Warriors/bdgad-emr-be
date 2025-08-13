@@ -60,26 +60,38 @@ export class GeneralFilesService {
    */
   async upsertCategory(categoryData: QueueCategory) {
     try {
-      // For ClickHouse, we'll use a simple insert approach
-      // If the table is ReplacingMergeTree, duplicates will be handled automatically
-      // Otherwise, we'll accept potential duplicates and let ClickHouse handle it
-      await this.clickHouseService.insert('categories', [
-        {
-          id: categoryData.id,
-          name: categoryData.name,
-          description: categoryData.description,
-        },
-      ]);
+      // Check if category exists
+      const existingCategory = await this.clickHouseService.query(
+        'SELECT id FROM categories WHERE id = {categoryId:UInt32} LIMIT 1',
+        { categoryId: categoryData.id },
+      );
 
-      console.log(`Processed category ID: ${categoryData.id}`);
-      return { updated: false, inserted: true };
+      const exists = existingCategory?.data?.length > 0;
+
+      if (!exists) {
+        // Only insert if it doesn't exist
+        await this.clickHouseService.insert('categories', [
+          {
+            id: categoryData.id,
+            name: categoryData.name,
+            description: categoryData.description,
+          },
+        ]);
+
+        console.log(`Inserted new category ID: ${categoryData.id}`);
+        return { updated: false, inserted: true };
+      } else {
+        console.log(
+          `Category ID ${categoryData.id} already exists, skipping insert`,
+        );
+        return { updated: true, inserted: false };
+      }
     } catch (error) {
-      // If insert fails due to duplicate key or other reasons, log and continue
-      console.log(
-        `Category ID ${categoryData.id} may already exist or other error:`,
+      console.error(
+        `Error processing category ID ${categoryData.id}:`,
         error.message,
       );
-      return { updated: true, inserted: false };
+      return { updated: false, inserted: false };
     }
   }
 
@@ -87,42 +99,51 @@ export class GeneralFilesService {
    * Upsert file (insert if not exists, update if exists)
    */
   async upsertFile(fileData: QueueGeneralFile) {
-    // Transform dates from ISO to ClickHouse format
-    const uploadedAt = new Date(fileData.uploadedAt)
-      .toISOString()
-      .slice(0, 19)
-      .replace('T', ' ');
-    const sendEmrAt = new Date(fileData.sendEmrAt)
-      .toISOString()
-      .slice(0, 19)
-      .replace('T', ' ');
-
     try {
-      // Simple insert approach for ClickHouse
-      await this.clickHouseService.insert('general_files', [
-        {
-          id: fileData.id,
-          file_name: fileData.fileName,
-          file_type: fileData.fileType,
-          file_size: fileData.fileSize,
-          file_path: fileData.filePath,
-          description: fileData.description,
-          category_id: fileData.categoryId,
-          uploaded_by: fileData.uploadedBy,
-          uploaded_at: uploadedAt,
-          send_emr_at: sendEmrAt,
-        },
-      ]);
-
-      console.log(`Processed file ID: ${fileData.id}`);
-      return { updated: false, inserted: true };
-    } catch (error) {
-      // If insert fails due to duplicate key or other reasons, log and continue
-      console.log(
-        `File ID ${fileData.id} may already exist or other error:`,
-        error.message,
+      // Check if file exists
+      const existingFile = await this.clickHouseService.query(
+        'SELECT id FROM general_files WHERE id = {fileId:UInt32} LIMIT 1',
+        { fileId: fileData.id },
       );
-      return { updated: true, inserted: false };
+
+      const exists = existingFile?.data?.length > 0;
+
+      if (!exists) {
+        // Transform dates from ISO to ClickHouse format
+        const uploadedAt = new Date(fileData.uploadedAt)
+          .toISOString()
+          .slice(0, 19)
+          .replace('T', ' ');
+        const sendEmrAt = new Date(fileData.sendEmrAt)
+          .toISOString()
+          .slice(0, 19)
+          .replace('T', ' ');
+
+        // Only insert if it doesn't exist
+        await this.clickHouseService.insert('general_files', [
+          {
+            id: fileData.id,
+            file_name: fileData.fileName,
+            file_type: fileData.fileType,
+            file_size: fileData.fileSize,
+            file_path: fileData.filePath,
+            description: fileData.description,
+            category_id: fileData.categoryId,
+            uploaded_by: fileData.uploadedBy,
+            uploaded_at: uploadedAt,
+            send_emr_at: sendEmrAt,
+          },
+        ]);
+
+        console.log(`Inserted new file ID: ${fileData.id}`);
+        return { updated: false, inserted: true };
+      } else {
+        console.log(`File ID ${fileData.id} already exists, skipping insert`);
+        return { updated: true, inserted: false };
+      }
+    } catch (error) {
+      console.error(`Error processing file ID ${fileData.id}:`, error.message);
+      return { updated: false, inserted: false };
     }
   }
 
