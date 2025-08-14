@@ -59,15 +59,7 @@ export class PatientService {
       sortOrder,
     });
 
-    // First, get all patients that have at least one test with current doctor
-    const patientsWithDoctorQuery = `
-      SELECT DISTINCT f.PatientKey
-      FROM FactGeneticTestResult f
-      JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
-      WHERE pr.DoctorId = {doctorId:UInt32}
-    `;
-
-    // Build WHERE conditions for filtering patients (excluding doctor filter)
+    // Build WHERE conditions for filtering
     const filterConditions: string[] = [];
     const queryParams: Record<string, any> = { doctorId };
 
@@ -91,7 +83,7 @@ export class PatientService {
         const dateFrom = new Date(searchDto.dateFrom)
           .toISOString()
           .split('T')[0];
-        filterConditions.push('f_filter.DateReceived >= {dateFrom:Date}');
+        filterConditions.push('f.DateReceived >= {dateFrom:Date}');
         queryParams.dateFrom = dateFrom;
         console.log('Added dateFrom filter:', queryParams.dateFrom);
       } catch (error) {
@@ -104,7 +96,7 @@ export class PatientService {
       try {
         // Ensure date is in correct format for ClickHouse
         const dateTo = new Date(searchDto.dateTo).toISOString().split('T')[0];
-        filterConditions.push('f_filter.DateReceived <= {dateTo:Date}');
+        filterConditions.push('f.DateReceived <= {dateTo:Date}');
         queryParams.dateTo = dateTo;
         console.log('Added dateTo filter:', queryParams.dateTo);
       } catch (error) {
@@ -152,23 +144,23 @@ export class PatientService {
 
     console.log('Order by clause:', orderByClause);
 
-    // Main query: Get patients that belong to doctor and match filters
+    // Main query: Get patients with filtering applied in a single pass
     const searchQuery = `
-      WITH patients_with_doctor AS (
-        ${patientsWithDoctorQuery}
+      WITH latest_patient_data AS (
+        SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address,
+               ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
+        FROM DimPatient
       ),
-      doctor_info AS (
-        SELECT DISTINCT 
+      filtered_tests AS (
+        SELECT DISTINCT
           f.PatientKey,
           pr.DoctorName
         FROM FactGeneticTestResult f
         JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+        LEFT JOIN DimTest t ON f.TestKey = t.TestKey
+        LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
         WHERE pr.DoctorId = {doctorId:UInt32}
-      ),
-      latest_patient_data AS (
-        SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address,
-               ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
-        FROM DimPatient
+        ${additionalFilters}
       )
       SELECT DISTINCT
         p.PatientKey as patientKey,
@@ -179,52 +171,37 @@ export class PatientService {
         p.Address as address,
         MAX(f_all.DateReceived) as lastTestDate,
         COUNT(f_all.TestKey) as totalTests,
-        di.DoctorName as doctorName
-      FROM patients_with_doctor pwd
-      JOIN latest_patient_data p ON pwd.PatientKey = p.PatientKey AND p.rn = 1
-      JOIN FactGeneticTestResult f_all ON pwd.PatientKey = f_all.PatientKey
-      JOIN doctor_info di ON pwd.PatientKey = di.PatientKey
-      ${
-        filterConditions.length > 0
-          ? `
-      -- Apply additional filters if any
-      JOIN FactGeneticTestResult f_filter ON pwd.PatientKey = f_filter.PatientKey
-      LEFT JOIN DimTest t ON f_filter.TestKey = t.TestKey
-      LEFT JOIN DimDiagnosis d ON f_filter.DiagnosisKey = d.DiagnosisKey
-      `
-          : ''
-      }
-      WHERE 1=1 ${additionalFilters}
+        ft.DoctorName as doctorName
+      FROM filtered_tests ft
+      JOIN latest_patient_data p ON ft.PatientKey = p.PatientKey AND p.rn = 1
+      JOIN FactGeneticTestResult f_all ON ft.PatientKey = f_all.PatientKey
       GROUP BY 
         p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, 
-        p.Barcode, p.Address, di.DoctorName
+        p.Barcode, p.Address, ft.DoctorName
       ORDER BY ${orderByClause}
       LIMIT {limit:UInt32} OFFSET {offset:UInt32}
     `;
 
     // Count query for pagination
     const countQuery = `
-      WITH patients_with_doctor AS (
-        ${patientsWithDoctorQuery}
-      ),
-      latest_patient_data AS (
+      WITH latest_patient_data AS (
         SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address,
                ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
         FROM DimPatient
+      ),
+      filtered_tests AS (
+        SELECT DISTINCT
+          f.PatientKey
+        FROM FactGeneticTestResult f
+        JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+        LEFT JOIN DimTest t ON f.TestKey = t.TestKey
+        LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+        WHERE pr.DoctorId = {doctorId:UInt32}
+        ${additionalFilters}
       )
-      SELECT COUNT(DISTINCT p.PatientKey) as total
-      FROM patients_with_doctor pwd
-      JOIN latest_patient_data p ON pwd.PatientKey = p.PatientKey AND p.rn = 1
-      ${
-        filterConditions.length > 0
-          ? `
-      JOIN FactGeneticTestResult f_filter ON pwd.PatientKey = f_filter.PatientKey
-      LEFT JOIN DimTest t ON f_filter.TestKey = t.TestKey
-      LEFT JOIN DimDiagnosis d ON f_filter.DiagnosisKey = d.DiagnosisKey
-      `
-          : ''
-      }
-      WHERE 1=1 ${additionalFilters}
+      SELECT COUNT(DISTINCT ft.PatientKey) as total
+      FROM filtered_tests ft
+      JOIN latest_patient_data p ON ft.PatientKey = p.PatientKey AND p.rn = 1
     `;
 
     queryParams.limit = limit;
