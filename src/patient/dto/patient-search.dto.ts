@@ -27,6 +27,10 @@ export class PatientSearchDto {
 
   @IsOptional()
   @IsString()
+  month?: string; // Format: YYYY-MM
+
+  @IsOptional()
+  @IsString()
   testType?: string;
 
   @IsOptional()

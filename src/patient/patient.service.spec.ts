@@ -140,6 +140,7 @@ describe('PatientService', () => {
         barcode: 'BC001',
         dateFrom: '2024-01-01',
         dateTo: '2024-01-31',
+        month: '2024-01',
         testType: 'Genetics',
         diagnosis: 'Normal',
         sortBy: 'name',
@@ -167,16 +168,83 @@ describe('PatientService', () => {
       expect(query).toContain('f.DateReceived <=');
       expect(query).toContain('t.TestCategory =');
       expect(query).toContain('d.DiagnosisDescription ILIKE');
+      expect(query).toContain('toYear(StartDate)');
+      expect(query).toContain('toMonth(StartDate)');
       expect(query).toContain('ORDER BY p.FullName ASC');
 
       expect(params?.name).toBe('%John%');
       expect(params?.barcode).toBe('BC001');
       expect(params?.dateFrom).toBe('2024-01-01');
       expect(params?.dateTo).toBe('2024-01-31');
+      expect(params?.monthYear).toBe('2024');
+      expect(params?.monthNum).toBe(1);
       expect(params?.testType).toBe('Genetics');
       expect(params?.diagnosis).toBe('%Normal%');
       expect(params?.limit).toBe(10);
       expect(params?.offset).toBe(10);
+    });
+
+    it('should search patients with month filter only', async () => {
+      const searchDto: PatientSearchDto = {
+        page: 1,
+        limit: 20,
+        month: '2024-03',
+        sortBy: 'lastTestDate',
+        sortOrder: 'DESC',
+      };
+
+      clickhouseService.query
+        .mockResolvedValueOnce(mockSearchResult)
+        .mockResolvedValueOnce(mockCountResult);
+
+      const result = await service.searchPatients(doctorId, searchDto);
+
+      expect(result).toEqual({
+        data: mockSearchResult.data,
+        pagination: {
+          page: 1,
+          limit: 20,
+          total: 1,
+          totalPages: 1,
+          hasNext: false,
+          hasPrev: false,
+        },
+      });
+      expect(clickhouseService.query).toHaveBeenCalledTimes(2);
+
+      // Verify that the query includes month filter
+      const firstCall = clickhouseService.query.mock.calls[0];
+      const query = firstCall[0];
+      const params = firstCall[1];
+
+      expect(query).toContain('toYear(StartDate) = {monthYear:UInt32}');
+      expect(query).toContain('toMonth(StartDate) = {monthNum:UInt32}');
+      expect(params?.monthYear).toBe('2024');
+      expect(params?.monthNum).toBe(3);
+    });
+
+    it('should handle invalid month number', async () => {
+      const searchDto: PatientSearchDto = {
+        page: 1,
+        limit: 20,
+        month: '2024-13', // Invalid month
+      };
+
+      await expect(service.searchPatients(doctorId, searchDto)).rejects.toThrow(
+        'Invalid month. Must be between 01 and 12',
+      );
+    });
+
+    it('should handle malformed month format', async () => {
+      const searchDto: PatientSearchDto = {
+        page: 1,
+        limit: 20,
+        month: '2024/01', // Invalid format
+      };
+
+      await expect(service.searchPatients(doctorId, searchDto)).rejects.toThrow(
+        'Invalid month format: 2024/01. Expected YYYY-MM',
+      );
     });
 
     it('should handle different sort options', async () => {

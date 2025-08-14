@@ -117,6 +117,32 @@ export class PatientService {
       console.log('Added diagnosis filter:', queryParams.diagnosis);
     }
 
+    // Handle month filter - this will be applied to patient StartDate, separate from test date filters
+    let monthFilter = '';
+    if (searchDto.month) {
+      try {
+        // Validate month format (YYYY-MM)
+        const monthMatch = searchDto.month.match(/^(\d{4})-(\d{2})$/);
+        if (!monthMatch) {
+          throw new Error('Invalid month format. Expected YYYY-MM');
+        }
+
+        const [, year, month] = monthMatch;
+        const monthNumber = parseInt(month, 10);
+
+        if (monthNumber < 1 || monthNumber > 12) {
+          throw new Error('Invalid month. Must be between 01 and 12');
+        }
+
+        queryParams.monthYear = year;
+        queryParams.monthNum = monthNumber;
+        console.log('Added month filter:', { year, month: monthNumber });
+      } catch (error) {
+        console.error('Invalid month format:', searchDto.month);
+        throw error; // Re-throw the original error to preserve specific error messages
+      }
+    }
+
     // Build additional filter WHERE clause
     const additionalFilters =
       filterConditions.length > 0
@@ -150,6 +176,7 @@ export class PatientService {
         SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address,
                ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
         FROM DimPatient
+        ${searchDto.month ? `WHERE toYear(StartDate) = {monthYear:UInt32} AND toMonth(StartDate) = {monthNum:UInt32}` : ''}
       ),
       filtered_tests AS (
         SELECT DISTINCT
@@ -188,6 +215,7 @@ export class PatientService {
         SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address,
                ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
         FROM DimPatient
+        ${searchDto.month ? `WHERE toYear(StartDate) = {monthYear:UInt32} AND toMonth(StartDate) = {monthNum:UInt32}` : ''}
       ),
       filtered_tests AS (
         SELECT DISTINCT
