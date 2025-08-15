@@ -13,12 +13,60 @@ import {
   ChatMessage,
   MessageRole,
 } from './dto/chat-completion.dto';
+import { ChatReqDto } from './dto/chat-req.dto';
+import { LanguageModel, streamText } from 'ai';
+import { createOpenAI } from '@ai-sdk/openai';
+import { UserInfo } from 'src/auth';
+import { AiMcpClientService } from 'src/ai-mcp-client/ai-mcp-client.service';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AiChatService {
   private readonly logger = new Logger(AiChatService.name);
+  private model: LanguageModel;
 
-  constructor(private readonly aiService: AiService) {}
+  constructor(
+    private readonly aiService: AiService,
+    private readonly mcpClientService: AiMcpClientService,
+    private readonly configService: ConfigService,
+  ) {
+    const yescaleOpenAI = createOpenAI({
+      // baseURL: this.configService.get('OPENAI_API_URL'),
+      apiKey: this.configService.get('OPENAI_API_KEY_2'),
+      // Override the default endpoint to use chat/completions instead of responses
+      // fetch: async (url: string, options: RequestInit) => {
+      // const modifiedUrl = url
+      //   .toString()
+      //   .replace('/v1/responses', '/v1/chat/completions');
+
+      // const body = JSON.parse(options.body as string);
+      // const newBody = {
+      //   model: body.model,
+      //   messages: body.input,
+      //   messages: [
+      //     {
+      //       role: 'user',
+      //       content: 'Hello',
+      //     },
+      //   ],
+      //   temperature: body.temperature,
+      //   max_tokens: body.max_tokens,
+      //   stream: body.stream,
+      //   tools: body.tools,
+      //   tool_choice: body.tool_choice,
+      // };
+
+      // console.log(newBody);
+
+      // const req = fetch(modifiedUrl, {
+      //   ...options,
+      //   body: JSON.stringify(newBody),
+      // });
+      // return req;
+      // },
+    });
+    this.model = yescaleOpenAI(DEFAULT_MODEL);
+  }
 
   async createCompletion(
     request: ChatCompletionRequest,
@@ -279,5 +327,28 @@ export class AiChatService {
   private estimateTokens(text: string): number {
     // Simple token estimation (rough approximation: ~4 characters per token)
     return Math.ceil(text.length / 4);
+  }
+
+  public async handleChat(request: ChatReqDto, user: UserInfo) {
+    const { messages, temperature = 0.7, maxTokens = 1000 } = request;
+
+    // Convert messages to AI SDK format
+    const aiMessages = messages.map((msg) => ({
+      role: msg.role,
+      // content: msg.content,
+      content: 'Hello',
+    }));
+
+    const tools = await this.mcpClientService.getTools();
+
+    const result = streamText({
+      tools,
+      model: this.model,
+      messages: [...createSystemMessages(user.id), ...aiMessages],
+      temperature,
+      maxOutputTokens: maxTokens,
+    });
+
+    return result;
   }
 }
