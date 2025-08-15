@@ -12,13 +12,15 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { Observable } from 'rxjs';
+import { openai } from '@ai-sdk/openai';
+import { streamText } from 'ai';
 import { AiChatService } from './ai-chat.service';
 import {
   ChatCompletionRequest,
   ChatCompletionResponse,
 } from './dto/chat-completion.dto';
 import { AuthGuard, User, UserInfo } from '../auth';
+import { ChatReqDto } from './dto/chat-req.dto';
 
 @Controller('chat')
 @UseGuards(AuthGuard)
@@ -79,21 +81,19 @@ export class AiChatController {
     }
   }
 
-  // Alternative SSE endpoint for clients that prefer the NestJS SSE pattern
-  @Sse('stream')
-  @UsePipes(new ValidationPipe({ transform: true }))
-  streamChat(
+  @Post()
+  async chat(
+    @Body() request: ChatReqDto,
+    @Res() res: Response,
     @User() user: UserInfo,
-    @Query() query: any,
-  ): Observable<MessageEvent> {
-    // For this endpoint, you'd pass the request as query parameters
-    // This is more "NestJS-like" but less OpenAI-compatible
-    const request: ChatCompletionRequest = {
-      messages: JSON.parse(query.messages || '[]'),
-      model: query.model || 'gpt-4o-mini',
-      stream: true,
-    };
+  ) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Transfer-Encoding', 'chunked');
 
-    return this.aiChatService.createStreamingCompletion(request, user.id);
+    const stream = await this.aiChatService.handleChat(request, user);
+
+    stream.pipeTextStreamToResponse(res);
   }
 }
