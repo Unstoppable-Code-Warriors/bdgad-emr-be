@@ -2,6 +2,8 @@ import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class S3Service {
@@ -142,6 +144,85 @@ export class S3Service {
       }
       this.logger.error('Error checking file existence:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Download a file from S3/R2 to a local folder
+   * If the file already exists locally, skip the download
+   */
+  async downloadFileToLocal(
+    s3Url: string,
+    localFolderPath: string,
+    filename?: string,
+  ): Promise<{ filePath: string; downloaded: boolean; message: string }> {
+    try {
+      const { bucket, key } = this.parseS3Url(s3Url);
+
+      // Use provided filename or extract from S3 key
+      const finalFilename = filename || path.basename(key);
+
+      // Ensure the local folder exists
+      if (!fs.existsSync(localFolderPath)) {
+        fs.mkdirSync(localFolderPath, { recursive: true });
+        this.logger.log(`Created directory: ${localFolderPath}`);
+      }
+
+      const localFilePath = path.join(localFolderPath, finalFilename);
+
+      // Check if file already exists locally
+      if (fs.existsSync(localFilePath)) {
+        this.logger.log(`File already exists: ${localFilePath}`);
+        return {
+          filePath: localFilePath,
+          downloaded: false,
+          message: 'File already exists locally, skipped download',
+        };
+      }
+
+      this.logger.log(
+        `Downloading file from S3 bucket: ${bucket}, key: ${key} to ${localFilePath}`,
+      );
+
+      // Download file from S3
+      const command = new GetObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      });
+
+      const response = await this.s3Client.send(command);
+
+      if (!response.Body) {
+        throw new Error('No file content received from S3');
+      }
+
+      // Convert the readable stream to buffer
+      const chunks: Uint8Array[] = [];
+      const reader = response.Body.transformToWebStream().getReader();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+
+      const buffer = Buffer.concat(chunks);
+
+      // Write file to local path
+      fs.writeFileSync(localFilePath, buffer);
+
+      this.logger.log(`File downloaded successfully to: ${localFilePath}`);
+
+      return {
+        filePath: localFilePath,
+        downloaded: true,
+        message: 'File downloaded successfully',
+      };
+    } catch (error) {
+      this.logger.error('Failed to download file from S3:', error);
+      throw new BadRequestException(
+        `Failed to download file: ${error.message}`,
+      );
     }
   }
 }

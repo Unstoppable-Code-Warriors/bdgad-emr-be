@@ -3,9 +3,20 @@ import { MockEtlService } from './mock-etl.service';
 import { MockEtlController } from './mock-etl.controller';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigService } from '@nestjs/config';
+import { HttpModule } from '@nestjs/axios';
+import { S3Module } from 'src/s3';
 
 @Module({
   imports: [
+    S3Module,
+    HttpModule.registerAsync({
+      useFactory: (configService: ConfigService) => {
+        return {
+          baseURL: configService.get<string>('OPEN_CRAVAT_SERVICE'),
+        };
+      },
+      inject: [ConfigService],
+    }),
     ClientsModule.registerAsync([
       {
         name: 'ETL_SERVICE',

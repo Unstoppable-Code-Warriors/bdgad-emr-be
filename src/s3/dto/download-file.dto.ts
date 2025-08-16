@@ -26,3 +26,23 @@ export interface DownloadFileResponse {
   expiresIn: number;
   expiresAt: string;
 }
+
+export class DownloadFileToLocalDto {
+  @IsString()
+  @IsNotEmpty()
+  s3Url: string;
+
+  @IsString()
+  @IsNotEmpty()
+  localFolderPath: string;
+
+  @IsOptional()
+  @IsString()
+  filename?: string;
+}
+
+export interface DownloadFileToLocalResponse {
+  filePath: string;
+  downloaded: boolean;
+  message: string;
+}

@@ -8,6 +8,6 @@ export class MockEtlController {
 
   @Post('analyze')
   sendMockEtl(@Body() body: MockEtlReqDto) {
-    return this.mockEtlService.sendMockEtl(body);
+    return this.mockEtlService.startAnalyze(body);
   }
 }

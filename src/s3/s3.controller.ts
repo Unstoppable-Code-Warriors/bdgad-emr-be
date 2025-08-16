@@ -7,7 +7,12 @@ import {
   Logger,
 } from '@nestjs/common';
 import { S3Service } from './s3.service';
-import { DownloadFileDto, DownloadFileResponse } from './dto/download-file.dto';
+import {
+  DownloadFileDto,
+  DownloadFileResponse,
+  DownloadFileToLocalDto,
+  DownloadFileToLocalResponse,
+} from './dto/download-file.dto';
 
 @Controller('files')
 export class S3Controller {
@@ -56,5 +61,29 @@ export class S3Controller {
     this.logger.log(`File existence check result: ${exists}`);
 
     return { exists };
+  }
+
+  @Post('download-to-local')
+  @HttpCode(HttpStatus.OK)
+  async downloadFileToLocal(
+    @Body() downloadFileToLocalDto: DownloadFileToLocalDto,
+  ): Promise<DownloadFileToLocalResponse> {
+    this.logger.log(
+      `Local download request for URL: ${downloadFileToLocalDto.s3Url} to folder: ${downloadFileToLocalDto.localFolderPath}`,
+    );
+
+    const { s3Url, localFolderPath, filename } = downloadFileToLocalDto;
+
+    const result = await this.s3Service.downloadFileToLocal(
+      s3Url,
+      localFolderPath,
+      filename,
+    );
+
+    this.logger.log(
+      `Local download completed: ${result.message}, path: ${result.filePath}`,
+    );
+
+    return result;
   }
 }
