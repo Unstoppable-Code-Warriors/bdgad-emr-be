@@ -1,43 +1,20 @@
-import {
-  IsArray,
-  IsEnum,
-  IsNumber,
-  IsOptional,
-  IsString,
-  ValidateNested,
-  Min,
-  Max,
-} from 'class-validator';
+import { IsArray, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
+import { UIMessage } from 'ai';
 
 export enum ChatRole {
   USER = 'user',
   ASSISTANT = 'assistant',
   SYSTEM = 'system',
 }
-
-export class MessageReqDto {
-  @IsEnum(ChatRole)
-  role: ChatRole;
-
-  @IsString()
-  content: string;
-}
-
 export class ChatReqDto {
+  @IsString()
+  id: string;
+
   @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => MessageReqDto)
-  messages: MessageReqDto[];
+  messages: UIMessage[];
 
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(2)
-  temperature?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(1)
-  maxTokens?: number;
+  @IsString()
+  trigger: string;
 }

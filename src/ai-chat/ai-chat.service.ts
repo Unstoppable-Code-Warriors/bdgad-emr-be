@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { createSystemMessages } from './constants/prompt';
 import { DEFAULT_MODEL } from './constants/models';
 import { ChatReqDto } from './dto/chat-req.dto';
-import { LanguageModel, streamText } from 'ai';
+import { convertToModelMessages, LanguageModel, streamText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { UserInfo } from 'src/auth';
 import { AiMcpClientService } from 'src/ai-mcp-client/ai-mcp-client.service';
@@ -25,22 +25,19 @@ export class AiChatService {
   }
 
   public async handleChat(request: ChatReqDto, user: UserInfo) {
-    const { messages, temperature = 0.7, maxTokens = 1000 } = request;
+    const { messages: uiMessages } = request;
 
     // Convert messages to AI SDK format
-    const aiMessages = messages.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
+    const messages = convertToModelMessages(uiMessages);
 
     const tools = await this.mcpClientService.getTools();
 
     const result = streamText({
       tools,
       model: this.model,
-      messages: [...createSystemMessages(user.id), ...aiMessages],
-      temperature,
-      maxOutputTokens: maxTokens,
+      messages: [...createSystemMessages(user.id), ...messages],
+      temperature: 0.7,
+      maxOutputTokens: 1000,
     });
 
     return result;
