@@ -1,4 +1,5 @@
-import { ChatRole, MessageReqDto } from '../dto/chat-req.dto';
+import { ModelMessage } from 'ai';
+import { ChatRole } from '../dto/chat-req.dto';
 
 export const DEFAULT_SYSTEM_PROMPT = `Tôi là trợ lý AI hỗ trợ bác sĩ trong hệ thống EMR (Electronic Medical Record). Nhiệm vụ chính của tôi là giúp bác sĩ tìm kiếm thông tin bệnh nhân, thống kê dữ liệu trong hệ thống EMR.
 
@@ -45,7 +46,7 @@ Tôi chỉ hỗ trợ nhiệm vụ tìm kiếm bệnh nhân và thống kê dữ
  * @param doctorId - The ID of the current logged-in doctor
  * @returns Array of system message objects
  */
-export const createSystemMessages = (doctorId: number): MessageReqDto[] => {
+export const createSystemMessages = (doctorId: number): ModelMessage[] => {
   return [
     {
       role: ChatRole.SYSTEM,
