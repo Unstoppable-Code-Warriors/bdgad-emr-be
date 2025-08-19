@@ -30,8 +30,7 @@ export class AiChatService {
     // Convert messages to AI SDK format
     const aiMessages = messages.map((msg) => ({
       role: msg.role,
-      // content: msg.content,
-      content: 'Hello',
+      content: msg.content,
     }));
 
     const tools = await this.mcpClientService.getTools();
