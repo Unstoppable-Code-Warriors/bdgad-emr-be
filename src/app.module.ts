@@ -26,7 +26,8 @@ import { AiMcpClientModule } from './ai-mcp-client/ai-mcp-client.module';
       },
     }),
     ScheduleModule.forRoot(),
-    ClickHouseModule.forRoot(), // Using default database
+    ClickHouseModule.forRoot(),
+    AiChatModule,
     AuthModule,
     PatientModule,
     PharmacyModule,
@@ -34,7 +35,6 @@ import { AiMcpClientModule } from './ai-mcp-client/ai-mcp-client.module';
     AiModule,
     GeneralFilesModule,
     MockEtlModule,
-    AiChatModule,
     S3Module,
     AiMcpClientModule,
   ],
