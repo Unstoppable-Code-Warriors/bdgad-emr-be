@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { PREDEFINED_DOCTORS, DoctorInfo } from './constants/doctors';
 import { generateCCCD } from './utils/cccd-generator';
@@ -44,95 +44,10 @@ import {
   TEST_CONCLUSIONS,
   TEST_NOTES,
 } from './constants/medical-data';
-import { ChatOpenAI } from '@langchain/openai';
-import { McpClientService } from '../mcp-client/mcp-client.service';
-import { createReactAgent } from '@langchain/langgraph/prebuilt';
-import { ConfigService } from '@nestjs/config';
-import { DEFAULT_MODEL } from '../ai-chat/constants/models';
 
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
-
-  private llm: ChatOpenAI;
-
-  constructor(
-    private readonly mcpClientService: McpClientService,
-    private readonly configService: ConfigService,
-  ) {
-    this.llm = new ChatOpenAI({
-      model: DEFAULT_MODEL,
-      apiKey: this.configService.get('OPENAI_API_KEY'),
-      configuration: {
-        baseURL: this.configService.get('OPENAI_API_URL'),
-        apiKey: this.configService.get('OPENAI_API_KEY'),
-      },
-    });
-  }
-
-  getLLM() {
-    return this.llm;
-  }
-
-  async getTools() {
-    this.logger.log('🔧 Loading tools from MCP client...');
-    try {
-      const tools = await this.mcpClientService.getTools();
-
-      this.logger.log(
-        `✅ Successfully loaded ${tools.length} tools for AI agent`,
-      );
-
-      if (tools.length > 0) {
-        this.logger.log('🛠️  Available tools for AI agent:');
-        tools.forEach((tool, index) => {
-          const toolName =
-            typeof tool === 'object' && tool && 'name' in tool
-              ? tool.name
-              : `Tool ${index + 1}`;
-          this.logger.log(`  ${index + 1}. 🔧 ${toolName}`);
-        });
-      } else {
-        this.logger.warn('⚠️  No tools available for AI agent');
-      }
-      return tools;
-    } catch (error) {
-      this.logger.error(
-        '❌ Failed to load tools from MCP client:',
-        error.message,
-      );
-      throw error;
-    }
-  }
-
-  async getAgent(): Promise<ReturnType<typeof createReactAgent>> {
-    this.logger.log('🤖 Creating AI agent with LangChain...');
-
-    // Log LLM configuration for debugging
-    this.logger.log('🔧 LLM Configuration:');
-    this.logger.log(`  🎯 Model: ${this.llm.model || 'Unknown'}`);
-    this.logger.log(`  📊 Max Tokens: ${this.llm.maxTokens || 'Default'}`);
-    this.logger.log(`  🌡️  Temperature: ${this.llm.temperature || 'Default'}`);
-
-    // Log configuration safely without accessing private properties
-    this.logger.log(
-      '  🔧 LLM instance created - configuration details available in AI module',
-    );
-
-    try {
-      const tools = await this.getTools();
-      const agent = createReactAgent({ llm: this.llm, tools });
-
-      // Handle different tool types for logging
-      this.logger.log(`✅ AI agent created successfully`);
-      this.logger.log(`🧠 Agent model: ${this.llm.model || 'Unknown'}`);
-      return agent;
-    } catch (error) {
-      this.logger.error('❌ Failed to create AI agent:', error.message);
-      this.logger.error('🚨 Agent creation stack:', error.stack);
-      throw error;
-    }
-  }
 
   /**
    * Generate mock data for pharmacy queue using constants and random logic
