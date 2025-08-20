@@ -24,6 +24,7 @@ export class DaytonaService implements OnModuleInit, OnModuleDestroy {
     this.sandbox = await this.daytona.create({
       language: 'python',
       image: Image.debianSlim('3.13'),
+      autoStopInterval: 0,
       resources: {
         cpu: 2, // 2 CPU cores
         memory: 4, // 4GB RAM
