@@ -38,9 +38,4 @@ export const createSystemMessages = (excelFilePath: string): ModelMessage[] => {
   ];
 };
 
-const rawSystemPrompt = (process.env.SYSTEM_PROMPT || '').trim();
-const normalizedSystemPrompt = rawSystemPrompt
-  ? rawSystemPrompt.replace(/\\n/g, '\n')
-  : '';
-
-export const SYSTEM_PROMPT = normalizedSystemPrompt || DEFAULT_SYSTEM_PROMPT;
+export const SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT;
