@@ -39,7 +39,7 @@ export class AiChatService {
       tools: {
         exploreExcel: dynamicTool({
           description:
-            'Explore and analyze the Excel file in detail by input Python code - shows sheet information, column details, data types, statistics, and sample data. You must include the excel file path that need to be analyzed in the python code',
+            'Explore and analyze the Excel file in detail by input Python code - shows sheet information, column details, data types, statistics, and sample data. You must include the excel file path that need to be analyzed in the python code. You must use print() to print the result',
           inputSchema: z.object({
             pythonCode: z.string(),
           }),
@@ -51,7 +51,7 @@ export class AiChatService {
         }),
         getExcelData: dynamicTool({
           description:
-            'Get the data from the Excel file by using python code, you must include the excel file path that need to be analyzed in the python code',
+            'Get the data from the Excel file by using python code, you must include the excel file path that need to be analyzed in the python code. You must use print() to print the result',
           inputSchema: z.object({
             pythonCode: z.string(),
           }),
