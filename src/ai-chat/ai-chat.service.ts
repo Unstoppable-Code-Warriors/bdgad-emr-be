@@ -66,6 +66,9 @@ export class AiChatService {
       messages: [...createSystemMessages(excelFilePath), ...messages],
       temperature: 0.7,
       maxOutputTokens: 1000,
+      stopWhen: (step) => {
+        return step.steps.length > 10;
+      },
     });
 
     return result;
