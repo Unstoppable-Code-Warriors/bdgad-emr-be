@@ -14,6 +14,7 @@ import { MockEtlModule } from './mock-etl/mock-etl.module';
 import { AiChatModule } from './ai-chat/ai-chat.module';
 import { S3Module } from './s3/s3.module';
 import { AiMcpClientModule } from './ai-mcp-client/ai-mcp-client.module';
+import { DaytonaModule } from './daytona/daytona.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { AiMcpClientModule } from './ai-mcp-client/ai-mcp-client.module';
     MockEtlModule,
     S3Module,
     AiMcpClientModule,
+    DaytonaModule,
   ],
   controllers: [AppController],
 })

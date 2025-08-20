@@ -2,11 +2,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { createSystemMessages } from './constants/prompt';
 import { DEFAULT_MODEL } from './constants/models';
 import { ChatReqDto } from './dto/chat-req.dto';
-import { convertToModelMessages, LanguageModel, streamText } from 'ai';
+import {
+  convertToModelMessages,
+  dynamicTool,
+  LanguageModel,
+  streamText,
+} from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { UserInfo } from 'src/auth';
-import { AiMcpClientService } from 'src/ai-mcp-client/ai-mcp-client.service';
 import { ConfigService } from '@nestjs/config';
+import z from 'zod';
+import { excelExploreCode } from 'src/ai-chat/constants/python-code';
+import { DaytonaService } from 'src/daytona/daytona.service';
 
 @Injectable()
 export class AiChatService {
@@ -14,8 +21,8 @@ export class AiChatService {
   private model: LanguageModel;
 
   constructor(
-    private readonly mcpClientService: AiMcpClientService,
     private readonly configService: ConfigService,
+    private readonly daytonaService: DaytonaService,
   ) {
     const yescaleOpenAI = createOpenAI({
       // baseURL: this.configService.get('OPENAI_API_URL'),
@@ -25,19 +32,41 @@ export class AiChatService {
   }
 
   public async handleChat(request: ChatReqDto, user: UserInfo) {
-    const { messages: uiMessages } = request;
-
+    const { messages: uiMessages, excelFilePath } = request;
     // Convert messages to AI SDK format
     const messages = convertToModelMessages(uiMessages);
 
-    const tools = await this.mcpClientService.getTools();
-
     const result = streamText({
-      tools,
+      tools: {
+        exploreExcel: dynamicTool({
+          description:
+            'Explore and analyze the Excel file in detail - shows sheet information, column details, data types, statistics, and sample data',
+          inputSchema: z.object({}),
+          execute: async () => {
+            const result = await this.daytonaService.executePythonCode(
+              excelExploreCode(excelFilePath),
+            );
+            return { result };
+          },
+        }),
+        getExcelData: dynamicTool({
+          description:
+            'Get the data from the Excel file by using python code, you must include the excel file path that need to be analyzed in the python code',
+          inputSchema: z.object({
+            pythonCode: z.string(),
+          }),
+          execute: async ({ pythonCode }) => {
+            const result =
+              await this.daytonaService.executePythonCode(pythonCode);
+            return { result };
+          },
+        }),
+      },
       model: this.model,
-      messages: [...createSystemMessages(user.id), ...messages],
+      messages: [...createSystemMessages(excelFilePath), ...messages],
       temperature: 0.7,
       maxOutputTokens: 1000,
+      toolChoice: 'required',
     });
 
     return result;

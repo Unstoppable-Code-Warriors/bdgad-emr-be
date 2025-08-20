@@ -17,4 +17,8 @@ export class ChatReqDto {
   @IsOptional()
   @IsString()
   trigger: string;
+
+  @IsOptional()
+  @IsString()
+  excelFilePath: string;
 }
