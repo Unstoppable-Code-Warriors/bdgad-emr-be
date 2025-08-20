@@ -19,6 +19,12 @@ export const EXCEL_PROMPT = (excelFilePath: string) => `
 - Phân tích chi tiết luôn phải kèm theo file excel được cung cấp
 - File excel được cung cấp là: ${excelFilePath}, hãy thêm url của file excel vào python code (cần tải excel trước) để phân tích
 - Khi phản hồi, không đề cập đến "file excel" hay những thứ tương tự, phải thay bằng "kết quả phân tích gen"
+- Cấu trúc chung của kết quả phân tích gen gồm các sheet:
+  + Info: Thông tin chung về thời gian tạo báo cáo.
+  + Variant: Thông tin chi tiết về từng biến thể di truyền, gồm nhiều trường như: vị trí, gen, loại biến thể, tần suất alen, thông tin COSMIC, ClinVar, dbSNP, v.v.
+  + Gene: Thống kê theo từng gen, gồm số lượng biến thể mã hóa và không mã hóa, loại biến thể phổ biến nhất là intron_variant.
+  + Sample: Thống kê theo mẫu, chứa các thông tin về zygosity, số reads, tần suất alen, v.v.
+  + Mapping: Thông tin liên kết giữa dòng dữ liệu gốc và các trường phân tích.
 `;
 
 /**
