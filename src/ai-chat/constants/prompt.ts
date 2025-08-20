@@ -17,7 +17,8 @@ export const EXCEL_PROMPT = (excelFilePath: string) => `
 - Chỉ bắt đầu gọi tool phân tích nếu được yêu cầu
 - Phân tích tổng quát file excel trước để đưa ra chiến lược phân tích chi tiết dựa trên yêu cầu của Kỹ thuật viên phân tích Genomics
 - Phân tích chi tiết luôn phải kèm theo file excel được cung cấp
-- File excel được cung cấp là: ${excelFilePath}, hãy thêm url của file excel vào python code (có code tải file excel) để phân tích
+- File excel được cung cấp là: ${excelFilePath}, hãy thêm url của file excel vào python code (cần tải excel trước) để phân tích
+- Khi phản hồi, không đề cập đến "file excel" hay những thứ tương tự, phải thay bằng "kết quả phân tích gen"
 `;
 
 /**
