@@ -12,7 +12,6 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { UserInfo } from 'src/auth';
 import { ConfigService } from '@nestjs/config';
 import z from 'zod';
-import { excelExploreCode } from 'src/ai-chat/constants/python-code';
 import { DaytonaService } from 'src/daytona/daytona.service';
 
 @Injectable()
@@ -40,12 +39,13 @@ export class AiChatService {
       tools: {
         exploreExcel: dynamicTool({
           description:
-            'Explore and analyze the Excel file in detail - shows sheet information, column details, data types, statistics, and sample data',
-          inputSchema: z.object({}),
-          execute: async () => {
-            const result = await this.daytonaService.executePythonCode(
-              excelExploreCode(excelFilePath),
-            );
+            'Explore and analyze the Excel file in detail by input Python code - shows sheet information, column details, data types, statistics, and sample data. You must include the excel file path that need to be analyzed in the python code',
+          inputSchema: z.object({
+            pythonCode: z.string(),
+          }),
+          execute: async ({ pythonCode }) => {
+            const result =
+              await this.daytonaService.executePythonCode(pythonCode);
             return { result };
           },
         }),
