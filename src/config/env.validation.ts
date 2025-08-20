@@ -21,9 +21,6 @@ export const envValidationSchema = Joi.object({
   // OpenAI configuration
   OPENAI_API_URL: Joi.string().default('https://api.openai.com/v1'),
 
-  // AI Chat configuration
-  SYSTEM_PROMPT: Joi.string().optional(),
-
   // S3/Cloudflare R2 configuration
   S3_ENDPOINT: Joi.string().required(),
   S3_ACCESS_KEY_ID: Joi.string().required(),
