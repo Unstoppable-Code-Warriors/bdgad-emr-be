@@ -6,6 +6,7 @@ import {
   convertToModelMessages,
   dynamicTool,
   LanguageModel,
+  stepCountIs,
   streamText,
 } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
@@ -66,9 +67,7 @@ export class AiChatService {
       messages: [...createSystemMessages(excelFilePath), ...messages],
       temperature: 0.7,
       maxOutputTokens: 1000,
-      stopWhen: (step) => {
-        return step.steps.length > 10;
-      },
+      stopWhen: stepCountIs(5),
     });
 
     return result;
