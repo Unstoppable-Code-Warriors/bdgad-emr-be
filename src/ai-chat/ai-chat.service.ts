@@ -4,12 +4,12 @@ import { DEFAULT_MODEL } from './constants/models';
 import { ChatReqDto } from './dto/chat-req.dto';
 import {
   convertToModelMessages,
-  dynamicTool,
   LanguageModel,
   stepCountIs,
   streamText,
+  tool,
 } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAI, openai } from '@ai-sdk/openai';
 import { UserInfo } from 'src/auth';
 import { ConfigService } from '@nestjs/config';
 import z from 'zod';
@@ -38,21 +38,10 @@ export class AiChatService {
 
     const result = streamText({
       tools: {
-        exploreExcel: dynamicTool({
+        web_search_preview: openai.tools.webSearchPreview({}),
+        exploreExcel: tool({
           description:
             'Explore and analyze the Excel file in detail by input Python code - shows sheet information, column details, data types, statistics, and sample data. You must include the excel file path that need to be analyzed in the python code. You must use print() to print the result',
-          inputSchema: z.object({
-            pythonCode: z.string(),
-          }),
-          execute: async ({ pythonCode }) => {
-            const result =
-              await this.daytonaService.executePythonCode(pythonCode);
-            return { result };
-          },
-        }),
-        getExcelData: dynamicTool({
-          description:
-            'Get the data from the Excel file by using python code, you must include the excel file path that need to be analyzed in the python code. You must use print() to print the result',
           inputSchema: z.object({
             pythonCode: z.string(),
           }),
