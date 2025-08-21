@@ -70,20 +70,26 @@ export class AiChatService {
 
         // Tool để tìm kiếm bệnh nhân và trả về danh sách
         searchPatients: tool({
-          description: `Tìm kiếm danh sách bệnh nhân trong hệ thống EMR.
+          description: `Tìm kiếm danh sách bệnh nhân trong hệ thống EMR với nhiều tiêu chí linh hoạt.
           
           Sử dụng tool này khi:
           - Người dùng yêu cầu "danh sách bệnh nhân"
-          - Tìm kiếm bệnh nhân cụ thể theo tên, ID, hoặc tiêu chí khác
-          - Cần thông tin chi tiết của bệnh nhân
+          - Tìm kiếm bệnh nhân theo tên, CMND, giới tính
+          - Tìm theo độ tuổi (khoảng năm sinh)
+          - Tìm theo số lần khám (khoảng từ X đến Y lần)
+          - Tìm bệnh nhân có khám trong khoảng thời gian cụ thể
           
-          Tool sẽ trả về mảng thông tin bệnh nhân bao gồm:
-          - Thông tin cơ bản: PatientKey, FullName, DateOfBirth, Gender, citizenID
-          - Tổng số lần khám (VisitCount)
+          Các tính năng tìm kiếm:
+          - Hỗ trợ khoảng ngày sinh (fromDob, toDob)
+          - Hỗ trợ khoảng số lần khám (minVisitCount, maxVisitCount)  
+          - Hỗ trợ khoảng thời gian khám (fromVisitDate, toVisitDate)
+          - Có thể kết hợp nhiều điều kiện
           
-          QUAN TRỌNG - Quy tắc bảo mật:
-          - CHỈ được truy cập bệnh nhân của bác sĩ ID ${user.id}
-          - PHẢI JOIN với DimProvider để verify quyền truy cập`,
+          QUAN TRỌNG: 
+          - Sau khi gọi tool này, CHỈ trả lời số lượng bệnh nhân tìm được
+          - KHÔNG đưa ra thông tin chi tiết của bệnh nhân
+          - KHÔNG đề cập đến tên bảng, tên cột hay thuật ngữ kỹ thuật
+          - Trả lời đơn giản, dễ hiểu cho bác sĩ`,
           inputSchema: z.object({
             searchCriteria: z.object({
               name: z
@@ -98,11 +104,35 @@ export class AiChatService {
               dateOfBirth: z
                 .string()
                 .optional()
-                .describe('Ngày sinh (YYYY-MM-DD)'),
+                .describe('Ngày sinh cụ thể (YYYY-MM-DD)'),
+              fromDob: z
+                .string()
+                .optional()
+                .describe('Ngày sinh từ (YYYY-MM-DD)'),
+              toDob: z
+                .string()
+                .optional()
+                .describe('Ngày sinh đến (YYYY-MM-DD)'),
+              minVisitCount: z
+                .number()
+                .optional()
+                .describe('Số lần khám tối thiểu'),
+              maxVisitCount: z
+                .number()
+                .optional()
+                .describe('Số lần khám tối đa'),
+              fromVisitDate: z
+                .string()
+                .optional()
+                .describe('Tìm bệnh nhân có khám từ ngày (YYYY-MM-DD)'),
+              toVisitDate: z
+                .string()
+                .optional()
+                .describe('Tìm bệnh nhân có khám đến ngày (YYYY-MM-DD)'),
               limit: z
                 .number()
                 .optional()
-                .default(5)
+                .default(20)
                 .describe('Giới hạn số lượng kết quả (mặc định 20)'),
             }),
             purpose: z.string().describe('Mục đích tìm kiếm (để logging)'),
@@ -599,12 +629,13 @@ except Exception as e:
             success: true,
             action: 'list_databases',
             data: dbResult.data || dbResult,
-            message: '✅ Đã lấy danh sách databases thành công',
+            message:
+              'Đã khám phá được các nguồn dữ liệu có sẵn trong hệ thống.',
           };
 
         case 'list_tables':
           if (!database) {
-            throw new Error('Database name is required for list_tables action');
+            throw new Error('Thiếu thông tin database để tiếp tục khám phá');
           }
           const tablesResult = await this.clickHouseService.query(
             `SHOW TABLES FROM \`${database}\``,
@@ -614,13 +645,13 @@ except Exception as e:
             action: 'list_tables',
             database,
             data: tablesResult.data || tablesResult,
-            message: `✅ Đã lấy danh sách tables từ database ${database} thành công`,
+            message: `Đã khám phá được các loại thông tin có sẵn trong hệ thống.`,
           };
 
         case 'describe_table':
           if (!database || !tableName) {
             throw new Error(
-              'Database and table name are required for describe_table action',
+              'Thiếu thông tin để khám phá cấu trúc dữ liệu chi tiết',
             );
           }
           const describeResult = await this.clickHouseService.query(
@@ -632,7 +663,7 @@ except Exception as e:
             database,
             tableName,
             data: describeResult.data || describeResult,
-            message: `✅ Đã lấy cấu trúc bảng ${tableName} thành công`,
+            message: `Đã hiểu được cấu trúc dữ liệu để có thể tìm kiếm chính xác.`,
           };
 
         default:
@@ -643,7 +674,7 @@ except Exception as e:
       return {
         success: false,
         action,
-        message: `❌ Lỗi khám phá ClickHouse: ${error.message}`,
+        message: `Có lỗi xảy ra khi khám phá dữ liệu hệ thống. Vui lòng thử lại.`,
       };
     }
   }
@@ -654,6 +685,12 @@ except Exception as e:
       citizenId?: string;
       gender?: string;
       dateOfBirth?: string;
+      fromDob?: string;
+      toDob?: string;
+      minVisitCount?: number;
+      maxVisitCount?: number;
+      fromVisitDate?: string;
+      toVisitDate?: string;
       limit?: number;
     },
     purpose: string,
@@ -688,14 +725,57 @@ except Exception as e:
         );
       }
 
+      // Date of birth conditions
       if (searchCriteria.dateOfBirth) {
         conditions.push(`p.DateOfBirth = '${searchCriteria.dateOfBirth}'`);
+      } else {
+        if (searchCriteria.fromDob) {
+          conditions.push(`p.DateOfBirth >= '${searchCriteria.fromDob}'`);
+        }
+        if (searchCriteria.toDob) {
+          conditions.push(`p.DateOfBirth <= '${searchCriteria.toDob}'`);
+        }
+      }
+
+      // Visit date range conditions
+      if (searchCriteria.fromVisitDate || searchCriteria.toVisitDate) {
+        const visitDateConditions: string[] = [];
+        if (searchCriteria.fromVisitDate) {
+          visitDateConditions.push(
+            `f.DateReceived >= '${searchCriteria.fromVisitDate} 00:00:00'`,
+          );
+        }
+        if (searchCriteria.toVisitDate) {
+          visitDateConditions.push(
+            `f.DateReceived <= '${searchCriteria.toVisitDate} 23:59:59'`,
+          );
+        }
+        if (visitDateConditions.length > 0) {
+          conditions.push(`(${visitDateConditions.join(' AND ')})`);
+        }
       }
 
       const whereClause = conditions.join(' AND ');
       const limit = searchCriteria.limit || 20;
 
-      // Build the query to get patient info with visit count
+      // Build HAVING clause for visit count range
+      const havingConditions: string[] = [];
+      if (searchCriteria.minVisitCount) {
+        havingConditions.push(
+          `COUNT(f.PatientKey) >= ${searchCriteria.minVisitCount}`,
+        );
+      }
+      if (searchCriteria.maxVisitCount) {
+        havingConditions.push(
+          `COUNT(f.PatientKey) <= ${searchCriteria.maxVisitCount}`,
+        );
+      }
+      const havingClause =
+        havingConditions.length > 0
+          ? `HAVING ${havingConditions.join(' AND ')}`
+          : '';
+
+      // Build the optimized query
       const query = `
         SELECT 
           p.PatientKey,
@@ -704,11 +784,14 @@ except Exception as e:
           p.Gender,
           p.citizenID,
           p.Address,
-          COUNT(f.PatientKey) as VisitCount
+          COUNT(f.PatientKey) as VisitCount,
+          MIN(f.DateReceived) as FirstVisitDate,
+          MAX(f.DateReceived) as LastVisitDate
         FROM default.DimPatient p
         LEFT JOIN default.FactGeneticTestResult f ON p.PatientKey = f.PatientKey
         WHERE ${whereClause}
         GROUP BY p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, p.citizenID, p.Address
+        ${havingClause}
         ORDER BY p.FullName
         LIMIT ${limit}
       `;
@@ -724,7 +807,7 @@ except Exception as e:
         searchCriteria,
         results: patients,
         totalFound: patients.length,
-        message: `✅ Tìm thấy ${patients.length} bệnh nhân phù hợp. Mục đích: ${purpose}`,
+        message: `Đã tìm thấy ${patients.length} bệnh nhân phù hợp với tiêu chí tìm kiếm.`,
       };
     } catch (error) {
       this.logger.error(`Patient search error: ${error.message}`);
@@ -734,7 +817,7 @@ except Exception as e:
         doctorId,
         searchCriteria,
         error: error.message,
-        message: `❌ Lỗi tìm kiếm bệnh nhân: ${error.message}`,
+        message: `Có lỗi xảy ra khi tìm kiếm bệnh nhân. Vui lòng thử lại.`,
         suggestion: 'Hãy kiểm tra lại tiêu chí tìm kiếm',
       };
     }
@@ -799,12 +882,7 @@ except Exception as e:
 
       if (!hasDoctorRestriction) {
         throw new Error(
-          `Câu truy vấn phải bao gồm điều kiện WHERE để giới hạn truy cập theo bác sĩ ID ${doctorId}. 
-          CHỈ được sử dụng các cách sau:
-          1. JOIN với DimProvider: ... JOIN DimProvider p ON ... WHERE p.DoctorId = ${doctorId}
-          2. ProviderKey subquery: WHERE ProviderKey IN (SELECT ProviderKey FROM DimProvider WHERE DoctorId = ${doctorId})
-          
-          KHÔNG được sử dụng thông tin từ JSON ExtendedInfo để verify bác sĩ.`,
+          `Truy vấn không hợp lệ. Chỉ được phép truy cập dữ liệu bệnh nhân trong phạm vi quyền hạn của bác sĩ hiện tại.`,
         );
       }
 
@@ -818,7 +896,7 @@ except Exception as e:
         query,
         data: result.data || result,
         rowCount: Array.isArray(result.data) ? result.data.length : 'unknown',
-        message: `✅ Thực hiện truy vấn thành công. Mục đích: ${purpose}`,
+        message: `Đã thực hiện thống kê thành công. Mục đích: ${purpose}`,
       };
     } catch (error) {
       this.logger.error(`Common query error: ${error.message}`);
@@ -828,9 +906,9 @@ except Exception as e:
         doctorId,
         query,
         error: error.message,
-        message: `❌ Lỗi thực hiện truy vấn: ${error.message}`,
+        message: `Có lỗi xảy ra khi thực hiện thống kê. Vui lòng thử lại.`,
         suggestion:
-          'Hãy kiểm tra lại câu truy vấn và đảm bảo có điều kiện WHERE với DoctorId',
+          'Hãy kiểm tra lại yêu cầu thống kê hoặc thử với tiêu chí khác',
       };
     }
   }
