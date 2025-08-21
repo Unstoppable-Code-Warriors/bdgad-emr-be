@@ -1,4 +1,3 @@
-// ai-chat.service.ts - Enhanced for genomics workflow
 import { Injectable, Logger } from '@nestjs/common';
 import { createSystemMessages } from './constants/prompt';
 import { ChatReqDto } from './dto/chat-req.dto';
@@ -7,14 +6,104 @@ import { openai } from '@ai-sdk/openai';
 import { UserInfo } from 'src/auth';
 import z from 'zod';
 import { DaytonaService } from 'src/daytona/daytona.service';
+import { DoctorChatReqDto } from './dto/doctor-chat-req.dto';
+import { createSystemDoctorMessages } from './constants/doctor-prompt';
+import { ClickHouseService } from 'src/clickhouse/clickhouse.service';
 
 @Injectable()
 export class AiChatService {
   private readonly logger = new Logger(AiChatService.name);
 
-  constructor(private readonly daytonaService: DaytonaService) {}
+  constructor(
+    private readonly daytonaService: DaytonaService,
+    private readonly clickHouseService: ClickHouseService,
+  ) {}
 
-  public async handleChat(request: ChatReqDto, user: UserInfo) {
+  public async handleDoctorChat(request: DoctorChatReqDto, user: UserInfo) {
+    const { messages: uiMessages } = request;
+    const messages = convertToModelMessages(uiMessages);
+
+    const result = streamText({
+      model: openai.responses('gpt-4.1-mini'),
+      messages: [...createSystemDoctorMessages(user.id), ...messages],
+      temperature: 0.3,
+      maxOutputTokens: 2000,
+      stopWhen: stepCountIs(10),
+      tools: {
+        // Tool để khám phá schema của ClickHouse
+        exploreClickHouseSchema: tool({
+          description: `Khám phá cấu trúc schema của ClickHouse để hiểu các bảng và cột có sẵn.
+          Sử dụng tool này TRƯỚC TIÊN để biết được cấu trúc dữ liệu trước khi tìm kiếm bệnh nhân.
+
+          Các thông tin sẽ được khám phá:
+          - Danh sách các databases
+          - Danh sách các bảng trong database
+          - Cấu trúc cột của các bảng liên quan đến bệnh nhân
+          - Tìm hiểu mối quan hệ giữa bác sĩ và bệnh nhân (DoctorId field)`,
+          inputSchema: z.object({
+            action: z
+              .enum(['list_databases', 'list_tables', 'describe_table'])
+              .describe(
+                'Hành động khám phá: liệt kê databases, tables, hoặc mô tả cấu trúc table',
+              ),
+            database: z
+              .string()
+              .optional()
+              .describe(
+                'Tên database (bắt buộc khi action là list_tables hoặc describe_table)',
+              ),
+            tableName: z
+              .string()
+              .optional()
+              .describe(
+                'Tên bảng cần mô tả (bắt buộc khi action là describe_table)',
+              ),
+          }),
+          execute: async ({ action, database, tableName }) => {
+            return await this.executeClickHouseExploration(
+              action,
+              database,
+              tableName,
+            );
+          },
+        }),
+
+        // Tool để tìm kiếm bệnh nhân
+        searchPatients: tool({
+          description: `Tìm kiếm thông tin bệnh nhân trong hệ thống EMR bằng câu lệnh SELECT.
+
+          QUAN TRỌNG - Quy tắc bảo mật:
+          - CHỈ được phép thực hiện câu lệnh SELECT
+          - PHẢI có điều kiện WHERE với DoctorId = ${user.id} (hoặc tương đương)
+          - KHÔNG được truy cập thông tin bệnh nhân của bác sĩ khác
+          - Query sẽ được kiểm tra tính hợp lệ trước khi thực thi
+
+          Các loại tìm kiếm hỗ trợ:
+          - Tìm theo tên, ID bệnh nhân
+          - Tìm theo triệu chứng, chẩn đoán
+          - Thống kê số lượng bệnh nhân
+          - Lọc theo thời gian khám bệnh`,
+          inputSchema: z.object({
+            query: z
+              .string()
+              .describe(
+                'Câu lệnh SQL SELECT để tìm kiếm bệnh nhân. PHẢI bao gồm điều kiện WHERE cho DoctorId',
+              ),
+            purpose: z
+              .string()
+              .describe('Mục đích của câu truy vấn (để logging và kiểm tra)'),
+          }),
+          execute: async ({ query, purpose }) => {
+            return await this.executePatientSearch(query, purpose, user.id);
+          },
+        }),
+      },
+    });
+
+    return result;
+  }
+
+  public async handleChat(request: ChatReqDto) {
     const { messages: uiMessages, excelFilePath } = request;
     const messages = convertToModelMessages(uiMessages);
 
@@ -444,6 +533,167 @@ except Exception as e:
         error: error.message,
         nextStep: null,
         message: '❌ Không thể chuẩn bị search sau 3 lần thử.',
+      };
+    }
+  }
+
+  // ClickHouse related methods
+  private async executeClickHouseExploration(
+    action: 'list_databases' | 'list_tables' | 'describe_table',
+    database?: string,
+    tableName?: string,
+  ) {
+    try {
+      this.logger.log(`ClickHouse exploration: ${action}`);
+
+      switch (action) {
+        case 'list_databases':
+          const dbResult = await this.clickHouseService.query('SHOW DATABASES');
+          return {
+            success: true,
+            action: 'list_databases',
+            data: dbResult.data || dbResult,
+            message: '✅ Đã lấy danh sách databases thành công',
+          };
+
+        case 'list_tables':
+          if (!database) {
+            throw new Error('Database name is required for list_tables action');
+          }
+          const tablesResult = await this.clickHouseService.query(
+            `SHOW TABLES FROM \`${database}\``,
+          );
+          return {
+            success: true,
+            action: 'list_tables',
+            database,
+            data: tablesResult.data || tablesResult,
+            message: `✅ Đã lấy danh sách tables từ database ${database} thành công`,
+          };
+
+        case 'describe_table':
+          if (!database || !tableName) {
+            throw new Error(
+              'Database and table name are required for describe_table action',
+            );
+          }
+          const describeResult = await this.clickHouseService.query(
+            `DESCRIBE TABLE \`${database}\`.\`${tableName}\``,
+          );
+          return {
+            success: true,
+            action: 'describe_table',
+            database,
+            tableName,
+            data: describeResult.data || describeResult,
+            message: `✅ Đã lấy cấu trúc bảng ${tableName} thành công`,
+          };
+
+        default:
+          throw new Error(`Unknown action: ${action}`);
+      }
+    } catch (error) {
+      this.logger.error(`ClickHouse exploration error: ${error.message}`);
+      return {
+        success: false,
+        action,
+        error: error.message,
+        message: `❌ Lỗi khám phá ClickHouse: ${error.message}`,
+      };
+    }
+  }
+
+  private async executePatientSearch(
+    query: string,
+    purpose: string,
+    doctorId: number,
+  ) {
+    try {
+      this.logger.log(`Patient search by doctor ${doctorId}: ${purpose}`);
+
+      // Validate query is SELECT only
+      const trimmedQuery = query.trim().toUpperCase();
+      if (!trimmedQuery.startsWith('SELECT')) {
+        throw new Error('Chỉ được phép thực hiện câu lệnh SELECT');
+      }
+
+      // Check for dangerous operations
+      const forbiddenOperations = [
+        'INSERT',
+        'UPDATE',
+        'DELETE',
+        'DROP',
+        'CREATE',
+        'ALTER',
+        'TRUNCATE',
+        'REPLACE',
+        'MERGE',
+        'OPTIMIZE',
+      ];
+
+      for (const op of forbiddenOperations) {
+        if (trimmedQuery.includes(op)) {
+          throw new Error(`Không được phép sử dụng lệnh ${op}`);
+        }
+      }
+
+      // Validate doctor access restriction - CHỈ cho phép JOIN với DimProvider
+      const queryLower = query.toLowerCase();
+
+      // Kiểm tra xem có JOIN với DimProvider và điều kiện DoctorId không
+      const hasProviderJoin =
+        queryLower.includes('dimprovider') ||
+        queryLower.includes('dim_provider');
+      const hasDoctorIdCondition =
+        queryLower.includes('doctorid') &&
+        (queryLower.includes(`= ${doctorId}`) ||
+          queryLower.includes(`= '${doctorId}'`));
+
+      // Kiểm tra có sử dụng ProviderKey subquery không
+      const hasProviderKeySubquery =
+        queryLower.includes('providerkey') &&
+        queryLower.includes('select') &&
+        queryLower.includes('dimprovider') &&
+        (queryLower.includes(`= ${doctorId}`) ||
+          queryLower.includes(`= '${doctorId}'`));
+
+      const hasDoctorRestriction =
+        (hasProviderJoin && hasDoctorIdCondition) || hasProviderKeySubquery;
+
+      if (!hasDoctorRestriction) {
+        throw new Error(
+          `Câu truy vấn phải bao gồm điều kiện WHERE để giới hạn truy cập theo bác sĩ ID ${doctorId}. 
+          CHỈ được sử dụng các cách sau:
+          1. JOIN với DimProvider: ... JOIN DimProvider p ON ... WHERE p.DoctorId = ${doctorId}
+          2. ProviderKey subquery: WHERE ProviderKey IN (SELECT ProviderKey FROM DimProvider WHERE DoctorId = ${doctorId})
+          
+          KHÔNG được sử dụng thông tin từ JSON ExtendedInfo để verify bác sĩ.`,
+        );
+      }
+
+      // Execute the query
+      const result = await this.clickHouseService.query(query);
+
+      return {
+        success: true,
+        purpose,
+        doctorId,
+        query,
+        data: result.data || result,
+        rowCount: Array.isArray(result.data) ? result.data.length : 'unknown',
+        message: `✅ Tìm kiếm bệnh nhân thành công. Mục đích: ${purpose}`,
+      };
+    } catch (error) {
+      this.logger.error(`Patient search error: ${error.message}`);
+      return {
+        success: false,
+        purpose,
+        doctorId,
+        query,
+        error: error.message,
+        message: `❌ Lỗi tìm kiếm bệnh nhân: ${error.message}`,
+        suggestion:
+          'Hãy kiểm tra lại câu truy vấn và đảm bảo có điều kiện WHERE với DoctorId',
       };
     }
   }
