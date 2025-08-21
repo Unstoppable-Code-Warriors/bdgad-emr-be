@@ -59,6 +59,7 @@ describe('PatientController', () => {
     lastTestDate: '2024-01-15',
     totalTests: 5,
     doctorName: 'Dr. Smith',
+    extendedInfo: null,
     recentTests: [
       {
         testKey: 1,
@@ -72,6 +73,7 @@ describe('PatientController', () => {
         location: 'bdgad',
         resultEtlUrl:
           'https://d46919b3b31b61ac349836b18c9ac671.r2.cloudflarestorage.com/results/patient-1/test-1.pdf',
+        ehrUrl: null,
       },
     ],
     testHistory: [],
@@ -88,6 +90,7 @@ describe('PatientController', () => {
       location: 'bdgad',
       resultEtlUrl:
         'https://d46919b3b31b61ac349836b18c9ac671.r2.cloudflarestorage.com/results/patient-1/test-1.pdf',
+      ehrUrl: null,
     },
   ];
 
