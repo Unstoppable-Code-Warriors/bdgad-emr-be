@@ -17,6 +17,8 @@ export class AiChatController {
   ) {
     const stream = await this.aiChatService.handleChat(request, user);
 
-    stream.pipeUIMessageStreamToResponse(res);
+    stream.pipeUIMessageStreamToResponse(res, {
+      sendSources: true,
+    });
   }
 }
