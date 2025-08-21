@@ -34,6 +34,20 @@ interface PeriodStatsResult {
 export class PatientService {
   constructor(private readonly clickhouseService: ClickHouseService) {}
 
+  /**
+   * Parse ehrUrl JSON string to object/array
+   */
+  private parseEhrUrl(ehrUrl: string | null): any {
+    if (!ehrUrl) return null;
+    
+    try {
+      return JSON.parse(ehrUrl);
+    } catch (error) {
+      console.warn('Failed to parse ehrUrl JSON:', ehrUrl, error);
+      return ehrUrl; // fallback to original string
+    }
+  }
+
   async searchPatients(
     doctorId: number,
     searchDto: PatientSearchDto,
@@ -408,7 +422,8 @@ export class PatientService {
         v.VariantName as variantName,
         v.ClinicalSignificance as clinicalSignificance,
         f.Location as location,
-        tr.result_etl_url as resultEtlUrl
+        tr.result_etl_url as resultEtlUrl,
+        tr.EHR_url as ehrUrl
       FROM FactGeneticTestResult f
       LEFT JOIN DimTest t ON f.TestKey = t.TestKey
       LEFT JOIN DimDate dd ON f.DateReportedKey = dd.DateKey
@@ -459,7 +474,10 @@ export class PatientService {
       const doctorName = (doctorNameResult.data[0] as { DoctorName: string })
         ?.DoctorName;
 
-      const recentTests = recentTestsResult.data as TestResult[];
+      const recentTests = (recentTestsResult.data as TestResult[]).map(test => ({
+        ...test,
+        ehrUrl: this.parseEhrUrl(test.ehrUrl)
+      }));
 
       // Parse extendedInfo JSON string to object
       let parsedExtendedInfo: PatientExtendedInfo | null = null;
@@ -519,7 +537,8 @@ export class PatientService {
         pr.ClinicName as clinicName,
         'completed' as status,
         f.Location as location,
-        tr.result_etl_url as resultEtlUrl
+        tr.result_etl_url as resultEtlUrl,
+        tr.EHR_url as ehrUrl
       FROM FactGeneticTestResult f
       LEFT JOIN DimTest t ON f.TestKey = t.TestKey
       LEFT JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
@@ -534,7 +553,10 @@ export class PatientService {
         // Remove doctorId parameter since we want all history
       })) as ClickHouseQueryResult;
 
-      return result.data as TestHistoryItem[];
+      return (result.data as TestHistoryItem[]).map(test => ({
+        ...test,
+        ehrUrl: this.parseEhrUrl(test.ehrUrl)
+      }));
     } catch (error) {
       console.error('Error getting patient test history:', error);
       throw error;

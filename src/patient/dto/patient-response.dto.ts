@@ -99,6 +99,7 @@ export interface TestResult {
   clinicalSignificance: string | null;
   location: string | null; // 'pharmacy' or 'bdgad'
   resultEtlUrl: string | null; // URL kết quả ETL từ DimTestRun
+  ehrUrl: any; // EHR URL từ DimTestRun - parsed JSON (array hoặc object)
 }
 
 export interface TestHistoryItem {
@@ -110,6 +111,7 @@ export interface TestHistoryItem {
   status: 'completed' | 'pending' | 'cancelled';
   location: string | null; // 'pharmacy' or 'bdgad'
   resultEtlUrl: string | null; // URL kết quả ETL từ DimTestRun
+  ehrUrl: any; // EHR URL từ DimTestRun - parsed JSON (array hoặc object)
 }
 
 export interface PatientSearchResponse {
