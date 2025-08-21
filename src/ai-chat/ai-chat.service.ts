@@ -68,33 +68,79 @@ export class AiChatService {
           },
         }),
 
-        // Tool để tìm kiếm bệnh nhân
+        // Tool để tìm kiếm bệnh nhân và trả về danh sách
         searchPatients: tool({
-          description: `Tìm kiếm thông tin bệnh nhân trong hệ thống EMR bằng câu lệnh SELECT.
+          description: `Tìm kiếm danh sách bệnh nhân trong hệ thống EMR.
+          
+          Sử dụng tool này khi:
+          - Người dùng yêu cầu "danh sách bệnh nhân"
+          - Tìm kiếm bệnh nhân cụ thể theo tên, ID, hoặc tiêu chí khác
+          - Cần thông tin chi tiết của bệnh nhân
+          
+          Tool sẽ trả về mảng thông tin bệnh nhân bao gồm:
+          - Thông tin cơ bản: PatientKey, FullName, DateOfBirth, Gender, citizenID
+          - Tổng số lần khám (VisitCount)
+          
+          QUAN TRỌNG - Quy tắc bảo mật:
+          - CHỈ được truy cập bệnh nhân của bác sĩ ID ${user.id}
+          - PHẢI JOIN với DimProvider để verify quyền truy cập`,
+          inputSchema: z.object({
+            searchCriteria: z.object({
+              name: z
+                .string()
+                .optional()
+                .describe('Tên bệnh nhân cần tìm (LIKE search)'),
+              citizenId: z
+                .string()
+                .optional()
+                .describe('CMND/CCCD của bệnh nhân'),
+              gender: z.string().optional().describe('Giới tính (Nam/Nữ)'),
+              dateOfBirth: z
+                .string()
+                .optional()
+                .describe('Ngày sinh (YYYY-MM-DD)'),
+              limit: z
+                .number()
+                .optional()
+                .default(5)
+                .describe('Giới hạn số lượng kết quả (mặc định 20)'),
+            }),
+            purpose: z.string().describe('Mục đích tìm kiếm (để logging)'),
+          }),
+          execute: async ({ searchCriteria, purpose }) => {
+            return await this.executePatientSearch(
+              searchCriteria,
+              purpose,
+              user.id,
+            );
+          },
+        }),
 
+        // Tool để thực hiện các truy vấn thống kê và phân tích chung
+        commonQuery: tool({
+          description: `Thực hiện các truy vấn thống kê và phân tích dữ liệu EMR.
+          
+          Sử dụng tool này khi:
+          - Đếm tổng số bệnh nhân, xét nghiệm, etc.
+          - Thống kê theo thời gian, giới tính, độ tuổi
+          - Phân tích xu hướng, báo cáo
+          - Các truy vấn SELECT không cần trả về danh sách bệnh nhân chi tiết
+          
           QUAN TRỌNG - Quy tắc bảo mật:
           - CHỈ được phép thực hiện câu lệnh SELECT
-          - PHẢI có điều kiện WHERE với DoctorId = ${user.id} (hoặc tương đương)
-          - KHÔNG được truy cập thông tin bệnh nhân của bác sĩ khác
-          - Query sẽ được kiểm tra tính hợp lệ trước khi thực thi
-
-          Các loại tìm kiếm hỗ trợ:
-          - Tìm theo tên, ID bệnh nhân
-          - Tìm theo triệu chứng, chẩn đoán
-          - Thống kê số lượng bệnh nhân
-          - Lọc theo thời gian khám bệnh`,
+          - PHẢI có điều kiện WHERE với DoctorId = ${user.id} qua JOIN DimProvider`,
           inputSchema: z.object({
             query: z
               .string()
               .describe(
-                'Câu lệnh SQL SELECT để tìm kiếm bệnh nhân. PHẢI bao gồm điều kiện WHERE cho DoctorId',
+                'Câu lệnh SQL SELECT để thống kê/phân tích. PHẢI có JOIN với DimProvider',
               ),
             purpose: z
               .string()
-              .describe('Mục đích của câu truy vấn (để logging và kiểm tra)'),
+              .describe('Mục đích truy vấn (để logging và kiểm tra)'),
           }),
           execute: async ({ query, purpose }) => {
-            return await this.executePatientSearch(query, purpose, user.id);
+            return await this.executeCommonQuery(query, purpose, user.id);
           },
         }),
       },
@@ -597,19 +643,110 @@ except Exception as e:
       return {
         success: false,
         action,
-        error: error.message,
         message: `❌ Lỗi khám phá ClickHouse: ${error.message}`,
       };
     }
   }
 
   private async executePatientSearch(
-    query: string,
+    searchCriteria: {
+      name?: string;
+      citizenId?: string;
+      gender?: string;
+      dateOfBirth?: string;
+      limit?: number;
+    },
     purpose: string,
     doctorId: number,
   ) {
     try {
       this.logger.log(`Patient search by doctor ${doctorId}: ${purpose}`);
+
+      // Build WHERE conditions
+      const conditions: string[] = [];
+
+      // Always include doctor restriction
+      conditions.push(
+        `f.ProviderKey IN (SELECT ProviderKey FROM default.DimProvider WHERE DoctorId = ${doctorId})`,
+      );
+
+      if (searchCriteria.name) {
+        conditions.push(
+          `p.FullName LIKE '%${searchCriteria.name.replace(/'/g, "''")}%'`,
+        );
+      }
+
+      if (searchCriteria.citizenId) {
+        conditions.push(
+          `p.citizenID = '${searchCriteria.citizenId.replace(/'/g, "''")}'`,
+        );
+      }
+
+      if (searchCriteria.gender) {
+        conditions.push(
+          `p.Gender = '${searchCriteria.gender.replace(/'/g, "''")}'`,
+        );
+      }
+
+      if (searchCriteria.dateOfBirth) {
+        conditions.push(`p.DateOfBirth = '${searchCriteria.dateOfBirth}'`);
+      }
+
+      const whereClause = conditions.join(' AND ');
+      const limit = searchCriteria.limit || 20;
+
+      // Build the query to get patient info with visit count
+      const query = `
+        SELECT 
+          p.PatientKey,
+          p.FullName,
+          p.DateOfBirth,
+          p.Gender,
+          p.citizenID,
+          p.Address,
+          COUNT(f.PatientKey) as VisitCount
+        FROM default.DimPatient p
+        LEFT JOIN default.FactGeneticTestResult f ON p.PatientKey = f.PatientKey
+        WHERE ${whereClause}
+        GROUP BY p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, p.citizenID, p.Address
+        ORDER BY p.FullName
+        LIMIT ${limit}
+      `;
+
+      // Execute the query
+      const result = await this.clickHouseService.query(query);
+      const patients = result.data || [];
+
+      return {
+        success: true,
+        purpose,
+        doctorId,
+        searchCriteria,
+        results: patients,
+        totalFound: patients.length,
+        message: `✅ Tìm thấy ${patients.length} bệnh nhân phù hợp. Mục đích: ${purpose}`,
+      };
+    } catch (error) {
+      this.logger.error(`Patient search error: ${error.message}`);
+      return {
+        success: false,
+        purpose,
+        doctorId,
+        searchCriteria,
+        error: error.message,
+        message: `❌ Lỗi tìm kiếm bệnh nhân: ${error.message}`,
+        suggestion: 'Hãy kiểm tra lại tiêu chí tìm kiếm',
+      };
+    }
+  }
+
+  private async executeCommonQuery(
+    query: string,
+    purpose: string,
+    doctorId: number,
+  ) {
+    try {
+      this.logger.log(`Common query by doctor ${doctorId}: ${purpose}`);
 
       // Validate query is SELECT only
       const trimmedQuery = query.trim().toUpperCase();
@@ -681,17 +818,17 @@ except Exception as e:
         query,
         data: result.data || result,
         rowCount: Array.isArray(result.data) ? result.data.length : 'unknown',
-        message: `✅ Tìm kiếm bệnh nhân thành công. Mục đích: ${purpose}`,
+        message: `✅ Thực hiện truy vấn thành công. Mục đích: ${purpose}`,
       };
     } catch (error) {
-      this.logger.error(`Patient search error: ${error.message}`);
+      this.logger.error(`Common query error: ${error.message}`);
       return {
         success: false,
         purpose,
         doctorId,
         query,
         error: error.message,
-        message: `❌ Lỗi tìm kiếm bệnh nhân: ${error.message}`,
+        message: `❌ Lỗi thực hiện truy vấn: ${error.message}`,
         suggestion:
           'Hãy kiểm tra lại câu truy vấn và đảm bảo có điều kiện WHERE với DoctorId',
       };
