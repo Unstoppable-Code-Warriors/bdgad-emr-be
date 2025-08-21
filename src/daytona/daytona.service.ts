@@ -28,7 +28,7 @@ export class DaytonaService implements OnModuleInit, OnModuleDestroy {
       resources: {
         cpu: 2, // 2 CPU cores
         memory: 4, // 4GB RAM
-        disk: 8, // 8GB disk space
+        disk: 4, // 4GB disk space
       },
     });
     this.sandbox.process.executeCommand('pip install pandas');
