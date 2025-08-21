@@ -37,7 +37,7 @@ export class DaytonaService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    await this.sandbox.delete();
+    if (sandbox) await daytona.remove(sandbox)
   }
 
   public async executePythonCode(pythonCode: string) {
