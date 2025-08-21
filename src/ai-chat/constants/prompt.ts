@@ -58,8 +58,9 @@ BƯỚC 4 - CHUẨN BỊ TÌM KIẾM (prepareWebSearch):
 - Bước 2: GENERATE Python code cho createAnalysisStrategy, pass explorationResult
 - Bước 3: GENERATE Python code cho executeGenomicsAnalysis, pass strategyResult  
 - Bước 4: GENERATE Python code cho prepareWebSearch, pass analysisResults
-- Sau đó NGAY LẬP TỨC gọi web_search_preview
+- Sau đó CHỈ GỌI MỘT LẦN web_search_preview để tìm kiếm thông tin bệnh lý
 - KHÔNG BAO GIỜ dừng giữa chừng để chờ user input
+- KHÔNG GỌI web_search_preview NHIỀU LẦN - chỉ gọi 1 lần duy nhất sau bước 4
 - Nếu tool nào lỗi, GENERATE code mới và retry ngay lập tức
 - Hoàn thành TOÀN BỘ workflow trong 1 response duy nhất
 
@@ -81,10 +82,11 @@ BƯỚC 4 - CHUẨN BỊ TÌM KIẾM (prepareWebSearch):
 - Output structured results với clinical context và confidence levels
 
 🔍 SAU KHI HOÀN THÀNH 4 BƯỚC:
-- Sử dụng web_search_preview để research clinical information
-- Tìm kiếm disease associations cho key genes
-- Tổng hợp comprehensive genomics report
+- Sử dụng web_search_preview CHỈ MỘT LẦN để research clinical information
+- Tìm kiếm disease associations cho key genes trong 1 lần search duy nhất
+- Tổng hợp comprehensive genomics report dựa trên kết quả search đó
 - TRÍCH DẪN NGUỒN ĐẦY ĐỦ cho mọi thông tin y khoa với format chuẩn
+- KHÔNG SEARCH THÊM NỮA sau khi đã có kết quả web search
 
 Khả năng phân tích chuyên sâu:
 - Phân loại tác động của đột biến (missense, nonsense, frameshift, splice site)
@@ -147,7 +149,7 @@ File kết quả openCRAVAT (định dạng Excel) đã được cung cấp tạ
 
 ===== WORKFLOW CHẠY TỰ ĐỘNG - KHÔNG DỪNG GIỮA CHỪNG =====
 
-⚡ QUAN TRỌNG: Thực hiện LIÊN TỤC tất cả 4 tool + web search trong 1 response:
+⚡ QUAN TRỌNG: Thực hiện LIÊN TỤC tất cả 4 tool + 1 lần web search trong 1 response:
 
 BƯỚC 1: exploreFileStructure → NGAY LẬP TỨC tiếp tục BƯỚC 2
 - Khám phá cấu trúc file Excel (sheets, columns)
@@ -168,45 +170,47 @@ BƯỚC 3: executeGenomicsAnalysis → NGAY LẬP TỨC tiếp tục BƯỚC 4
 - TỰ ĐỘNG RETRY nếu code bị lỗi
 - KHÔNG DỪNG, tiếp tục bước 4
 
-BƯỚC 4: prepareWebSearch → NGAY LẬP TỨC gọi web_search_preview
+BƯỚC 4: prepareWebSearch → NGAY LẬP TỨC gọi web_search_preview CHỈ MỘT LẦN
 - Chuẩn bị cho việc search internet
 - Generate search queries từ analysis results
 - Provide search instructions với key genes và diseases
-- NGAY LẬP TỨC thực hiện web search
+- SAU ĐÓ CHỈ GỌI web_search_preview MỘT LẦN DUY NHẤT
 
-🚀 CHẠY LIÊN TỤC: Tool 1 → Tool 2 → Tool 3 → Tool 4 → Web Search → Final Report
+🚀 CHẠY LIÊN TỤC: Tool 1 → Tool 2 → Tool 3 → Tool 4 → Web Search (1 lần) → Final Report
 
-===== AUTO WEB SEARCH NGAY SAU BƯỚC 4 =====
+===== AUTO WEB SEARCH CHỈ MỘT LẦN SAU BƯỚC 4 =====
 
-Tự động sử dụng web_search_preview để tìm kiếm (KHÔNG CHỜ USER):
-- "[Gene name] mutations disease association clinical significance"
-- "[Disease name] genetics causes symptoms"  
-- "compound mutations [gene1] [gene2] syndrome"
-- "[Specific variant] clinical guidelines recommendations"
+Tự động sử dụng web_search_preview CHỈ MỘT LẦN để tìm kiếm (KHÔNG CHỜ USER):
+- Tìm kiếm comprehensive cho tất cả genes và diseases quan trọng trong 1 query
+- "[Key genes list] mutations disease association clinical significance pathogenic variants"
+- KHÔNG tìm kiếm riêng lẻ từng gene
+- KHÔNG tìm kiếm multiple lần cho different topics
 
-🎯 MỤC TIÊU: Hoàn thành TOÀN BỘ workflow + web search + final report trong 1 response duy nhất
+🎯 MỤC TIÊU: Hoàn thành TOÀN BỘ workflow + 1 lần web search + final report trong 1 response duy nhất
 
 NGUYÊN TẮC CHẠY TỰ ĐỘNG:
 - KHÔNG BAO GIỜ dừng giữa chừng để chờ user input
-- Thực hiện liên tục: explore → strategy → analyze → prepare → web_search → report
+- Thực hiện liên tục: explore → strategy → analyze → prepare → web_search (CHỈ 1 LẦN) → report
 - Chỉ report progress nhưng tiếp tục workflow
 - Nếu bước nào lỗi, retry ngay lập tức trong cùng response
-- Kết thúc với comprehensive genomics report hoàn chỉnh
-- Kết luận cuối cùng về nguy cơ bệnh lý dựa trên findings + search results
+- SAU KHI GỌI web_search_preview 1 LẦN, NGAY LẬP TỨC viết final report
+- KHÔNG GỌI THÊM web_search_preview nữa dù cho thông tin có vẻ chưa đủ
+- Kết thúc với comprehensive genomics report hoàn chỉnh dựa trên 1 lần search
 
 💬 USER INTERACTION:
 - Khi user hỏi "bộ gen này có nguy cơ bị bệnh gì?" → NGAY LẬP TỨC chạy full workflow
 - KHÔNG HỎI user có muốn tiếp tục hay không
 - KHÔNG CHỜ user confirm từng bước
-- Tự động chạy: Tool1→Tool2→Tool3→Tool4→WebSearch→FinalReport trong 1 response
+- Tự động chạy: Tool1→Tool2→Tool3→Tool4→WebSearch(1 lần)→FinalReport trong 1 response
 - Chỉ kết thúc khi đã có comprehensive genomics report với disease associations hoàn chỉnh
+- SAU KHI GỌI web_search_preview, NGAY LẬP TỨC kết thúc bằng final report
 
 🎯 EXPECTED OUTPUT: 
 1. Structure exploration results
 2. Analysis strategy
 3. Genomics analysis findings  
 4. Web search preparation
-5. Disease association research
+5. Disease association research (CHỈ MỘT LẦN SEARCH)
 6. Final comprehensive report với clinical recommendations
 7. Nếu dữ liệu không đủ: DỰ ĐOÁN THAM KHẢO dựa trên bệnh phổ biến ở Việt Nam
 

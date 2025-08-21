@@ -187,13 +187,15 @@ export class AiChatService {
       model: openai.responses('gpt-4.1-mini'),
       messages: [...createSystemMessages(excelFilePath), ...messages],
       temperature: 0.3, // Lower temperature for more consistent medical analysis
-      maxOutputTokens: 2000, // Increased for comprehensive analysis
-      stopWhen: stepCountIs(20), // Allow more steps for thorough analysis
+      maxOutputTokens: 1500, // Reduced to prevent excessive output
+      stopWhen: stepCountIs(6), // Reduced from 10 to 6: 4 analysis steps + 1 web search + 1 final report
       tools: {
-        // Web search tool for medical research
+        // Web search tool for medical research - WITH USAGE TRACKING
         web_search_preview: openai.tools.webSearchPreview({
           toModelOutput: (output) => {
-            this.logger.log('Web search performed for genomics analysis');
+            this.logger.log(
+              'Web search performed for genomics analysis - SINGLE USE ONLY',
+            );
             return output;
           },
         }),
