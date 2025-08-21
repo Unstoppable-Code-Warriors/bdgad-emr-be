@@ -9,6 +9,7 @@ import {
   DashboardStats,
   TestResult,
   TestHistoryItem,
+  PatientExtendedInfo,
 } from './dto/patient-response.dto';
 
 interface ClickHouseQueryResult {
@@ -359,7 +360,7 @@ export class PatientService {
     // Get patient basic info (latest record)
     const patientInfoQuery = `
       WITH latest_patient_data AS (
-        SELECT PatientKey, PatientSourceID, FullName, DateOfBirth, Gender, Barcode, Address,
+        SELECT PatientKey, PatientSourceID, FullName, DateOfBirth, Gender, Barcode, Address, ExtendedInfo,
                ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
         FROM DimPatient
         WHERE PatientKey = {patientKey:UInt64}
@@ -371,7 +372,8 @@ export class PatientService {
         p.DateOfBirth as dateOfBirth,
         p.Gender as gender,
         p.Barcode as barcode,
-        p.Address as address
+        p.Address as address,
+        p.ExtendedInfo as extendedInfo
       FROM latest_patient_data p
       WHERE p.rn = 1
     `;
@@ -443,6 +445,7 @@ export class PatientService {
 
       const patientData = patientResult.data[0] as PatientSummary & {
         patientSourceId: string;
+        extendedInfo: string;
       };
       if (!patientData) {
         throw new NotFoundException('Patient not found');
@@ -458,8 +461,18 @@ export class PatientService {
 
       const recentTests = recentTestsResult.data as TestResult[];
 
+      // Parse extendedInfo JSON string to object
+      let parsedExtendedInfo: PatientExtendedInfo | null = null;
+      try {
+        parsedExtendedInfo = patientData.extendedInfo ? JSON.parse(patientData.extendedInfo) : null;
+      } catch (error) {
+        console.warn('Failed to parse extendedInfo JSON:', error);
+        parsedExtendedInfo = null; // set to null if parsing fails
+      }
+
       return {
         ...patientData,
+        extendedInfo: parsedExtendedInfo,
         lastTestDate: patientStats.lastTestDate,
         totalTests: patientStats.totalTests,
         doctorName: doctorName,
