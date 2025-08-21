@@ -1,5 +1,5 @@
 // Model constants for AI Chat service
-export const DEFAULT_MODEL = 'gpt-4.1';
+export const DEFAULT_MODEL = 'gpt-5';
 
 // The model in request body is kept only for OpenAI API compatibility
 // but internally we always use DEFAULT_MODEL

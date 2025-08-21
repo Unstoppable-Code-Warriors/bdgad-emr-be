@@ -38,7 +38,9 @@ export class AiChatService {
 
     const result = streamText({
       tools: {
-        web_search_preview: openai.tools.webSearchPreview({}),
+        web_search_preview: openai.tools.webSearchPreview({
+          toModelOutput: (output) => output,
+        }),
         exploreExcel: tool({
           description:
             'Explore and analyze the Excel file in detail by input Python code - shows sheet information, column details, data types, statistics, and sample data. You must include the excel file path that need to be analyzed in the python code. You must use print() to print the result',
