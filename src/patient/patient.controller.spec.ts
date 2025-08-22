@@ -51,6 +51,7 @@ describe('PatientController', () => {
   const mockPatientDetails = {
     patientKey: 1,
     patientSourceId: 'PS001',
+    citizenId: '123456789012',
     fullName: 'John Doe',
     dateOfBirth: '1990-01-01',
     gender: 'Male',
