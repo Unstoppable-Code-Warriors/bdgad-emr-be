@@ -83,6 +83,7 @@ export interface PatientSummary {
 
 export interface PatientDetails extends PatientSummary {
   patientSourceId: string;
+  citizenId: string;
   extendedInfo: PatientExtendedInfo | null; // Structured JSON object
   recentTests: TestResult[];
   testHistory: TestHistoryItem[];

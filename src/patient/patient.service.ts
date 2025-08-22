@@ -384,7 +384,7 @@ export class PatientService {
     // Get patient basic info (latest record)
     const patientInfoQuery = `
       WITH latest_patient_data AS (
-        SELECT PatientKey, PatientSourceID, FullName, DateOfBirth, Gender, Barcode, Address, ExtendedInfo,
+        SELECT PatientKey, PatientSourceID, FullName, DateOfBirth, Gender, Barcode, Address, ExtendedInfo, citizenID,
                ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
         FROM DimPatient
         WHERE PatientKey = {patientKey:UInt64}
@@ -397,6 +397,7 @@ export class PatientService {
         p.Gender as gender,
         p.Barcode as barcode,
         p.Address as address,
+        p.citizenID as citizenId,
         p.ExtendedInfo as extendedInfo
       FROM latest_patient_data p
       WHERE p.rn = 1
@@ -470,6 +471,7 @@ export class PatientService {
 
       const patientData = patientResult.data[0] as PatientSummary & {
         patientSourceId: string;
+        citizenId: string;
         extendedInfo: string;
       };
       if (!patientData) {
@@ -846,18 +848,28 @@ export class PatientService {
     const query = `
       SELECT 
         f.TestRunKey as testRunKey,
-        d.FullDate as date,
+        CASE 
+          WHEN f.DateReceivedKey IS NOT NULL THEN d1.FullDate
+          ELSE COALESCE(d2.FullDate, toDate(f.DateReceived))
+        END as date,
         tr.EHR_url,
         tr.CaseID as caseId,
         COUNT(*) as totalFiles
       FROM FactGeneticTestResult f
-      LEFT JOIN DimDate d ON f.DateReceivedKey = d.DateKey
+      LEFT JOIN DimDate d1 ON f.DateReceivedKey = d1.DateKey
+      LEFT JOIN DimDate d2 ON toUInt64(formatDateTime(f.DateReceived, '%Y%m%d')) = d2.DateKey
       LEFT JOIN DimTestRun tr ON f.TestRunKey = tr.TestRunKey
       WHERE f.Location = 'bdgad'
         AND f.PatientKey = {patientKey:UInt64}
         AND f.TestRunKey IS NOT NULL
-      GROUP BY f.TestRunKey, d.FullDate, tr.EHR_url, tr.CaseID
-      ORDER BY d.FullDate DESC, f.TestRunKey DESC
+      GROUP BY f.TestRunKey, CASE 
+          WHEN f.DateReceivedKey IS NOT NULL THEN d1.FullDate
+          ELSE COALESCE(d2.FullDate, toDate(f.DateReceived))
+        END, tr.EHR_url, tr.CaseID
+      ORDER BY CASE 
+          WHEN f.DateReceivedKey IS NOT NULL THEN d1.FullDate
+          ELSE COALESCE(d2.FullDate, toDate(f.DateReceived))
+        END DESC, f.TestRunKey DESC
     `;
 
     const result = await this.clickhouseService.query(query, { patientKey });
@@ -897,7 +909,10 @@ export class PatientService {
     const query = `
       SELECT 
         f.TestRunKey as testRunKey,
-        d.FullDate as date,
+        CASE 
+          WHEN f.DateReceivedKey IS NOT NULL THEN d1.FullDate
+          ELSE COALESCE(d2.FullDate, toDate(f.DateReceived))
+        END as date,
         tr.EHR_url,
         p.citizenID,
         p.FullName,
@@ -905,7 +920,8 @@ export class PatientService {
         p.Gender,
         p.Address
       FROM FactGeneticTestResult f
-      LEFT JOIN DimDate d ON f.DateReceivedKey = d.DateKey
+      LEFT JOIN DimDate d1 ON f.DateReceivedKey = d1.DateKey
+      LEFT JOIN DimDate d2 ON toUInt64(formatDateTime(f.DateReceived, '%Y%m%d')) = d2.DateKey
       LEFT JOIN DimTestRun tr ON f.TestRunKey = tr.TestRunKey
       LEFT JOIN DimPatient p ON f.PatientKey = p.PatientKey
       WHERE f.Location = 'bdgad'
