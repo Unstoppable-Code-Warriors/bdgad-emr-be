@@ -711,7 +711,7 @@ except Exception as e:
 
       if (searchCriteria.name) {
         conditions.push(
-          `p.FullName LIKE '%${searchCriteria.name.replace(/'/g, "''")}%'`,
+          `LOWER(p.FullName) LIKE LOWER('%${searchCriteria.name.replace(/'/g, "''")}%')`,
         );
       }
 
