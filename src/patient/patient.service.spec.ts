@@ -141,6 +141,8 @@ describe('PatientService', () => {
         dateFrom: '2024-01-01',
         dateTo: '2024-01-31',
         month: '2024-01',
+        folderYear: 2025,
+        folderMonth: 8,
         testType: 'Genetics',
         diagnosis: 'Normal',
         sortBy: 'name',

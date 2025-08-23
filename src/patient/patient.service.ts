@@ -163,6 +163,23 @@ export class PatientService {
       console.log('Added diagnosis filter:', queryParams.diagnosis);
     }
 
+    // Handle folderMonth and folderYear filters using DateReceivedKey and DimDate
+    if (searchDto.folderMonth || searchDto.folderYear) {
+      console.log('Processing folder date filters:', { folderMonth: searchDto.folderMonth, folderYear: searchDto.folderYear });
+      
+      if (searchDto.folderYear) {
+        filterConditions.push('dd.Year = {folderYear:UInt32}');
+        queryParams.folderYear = searchDto.folderYear;
+        console.log('Added folderYear filter:', queryParams.folderYear);
+      }
+      
+      if (searchDto.folderMonth) {
+        filterConditions.push('dd.Month = {folderMonth:UInt32}');
+        queryParams.folderMonth = searchDto.folderMonth;
+        console.log('Added folderMonth filter:', queryParams.folderMonth);
+      }
+    }
+
     // Handle month filter - this will be applied to patient StartDate, separate from test date filters
     let monthFilter = '';
     if (searchDto.month) {
@@ -234,6 +251,7 @@ export class PatientService {
         JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
         LEFT JOIN DimTest t ON f.TestKey = t.TestKey
         LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+        ${searchDto.folderMonth || searchDto.folderYear ? 'LEFT JOIN DimDate dd ON f.DateReceivedKey = dd.DateKey' : ''}
         WHERE pr.DoctorId = {doctorId:UInt32}
         ${additionalFilters}
       )
@@ -275,6 +293,7 @@ export class PatientService {
         JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
         LEFT JOIN DimTest t ON f.TestKey = t.TestKey
         LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+        ${searchDto.folderMonth || searchDto.folderYear ? 'LEFT JOIN DimDate dd ON f.DateReceivedKey = dd.DateKey' : ''}
         WHERE pr.DoctorId = {doctorId:UInt32}
         ${additionalFilters}
       )

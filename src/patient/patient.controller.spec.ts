@@ -209,6 +209,27 @@ describe('PatientController', () => {
       );
     });
 
+    it('should handle search with folder date filters', async () => {
+      const searchDto: PatientSearchDto = {
+        page: 1,
+        limit: 10,
+        folderYear: 2025,
+        folderMonth: 8,
+        sortBy: 'lastTestDate',
+        sortOrder: 'DESC',
+      };
+
+      patientService.searchPatients.mockResolvedValue(mockSearchResponse);
+
+      const result = await controller.searchPatients(mockUser, searchDto);
+
+      expect(result).toEqual(mockSearchResponse);
+      expect(patientService.searchPatients).toHaveBeenCalledWith(
+        mockUser.id,
+        searchDto,
+      );
+    });
+
     it('should handle empty search results', async () => {
       const searchDto: PatientSearchDto = {
         page: 1,
