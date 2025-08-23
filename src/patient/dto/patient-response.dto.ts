@@ -76,6 +76,7 @@ export interface PatientSummary {
   gender: string | null;
   barcode: string;
   address: string | null;
+  citizenID: string;
   lastTestDate: string;
   totalTests: number;
   doctorName: string;

@@ -70,7 +70,7 @@ export class PatientService {
 
     const {
       page = 1,
-      limit = 20,
+      limit = 100,
       sortBy = 'lastTestDate',
       sortOrder = 'DESC',
     } = searchDto;
@@ -100,6 +100,24 @@ export class PatientService {
       filterConditions.push('p.Barcode = {barcode:String}');
       queryParams.barcode = searchDto.barcode;
       console.log('Added barcode filter:', queryParams.barcode);
+    }
+
+    // citizenID filter will be handled separately in the latest_patient_data CTE
+    let citizenIdFilter = '';
+    if (searchDto.citizenid) {
+      citizenIdFilter = `AND citizenID = {citizenid:String}`;
+      queryParams.citizenid = searchDto.citizenid;
+      console.log('Added citizenid filter:', queryParams.citizenid);
+    }
+
+    // keyword filter will be handled separately in the latest_patient_data CTE
+    // keyword can match either FullName or citizenID
+    let keywordFilter = '';
+    if (searchDto.keyword) {
+      keywordFilter = `AND (FullName ILIKE {keyword:String} OR citizenID LIKE {keywordCitizenId:String})`;
+      queryParams.keyword = `%${searchDto.keyword}%`;
+      queryParams.keywordCitizenId = `%${searchDto.keyword}%`;
+      console.log('Added keyword filter:', queryParams.keyword);
     }
 
     if (searchDto.dateFrom) {
@@ -198,10 +216,12 @@ export class PatientService {
     // Main query: Get patients with filtering applied in a single pass
     const searchQuery = `
       WITH latest_patient_data AS (
-        SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address,
+        SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address, citizenID,
                ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
         FROM DimPatient
-        ${searchDto.month ? `WHERE toYear(StartDate) = {monthYear:UInt32} AND toMonth(StartDate) = {monthNum:UInt32}` : ''}
+        ${searchDto.month || searchDto.citizenid || searchDto.keyword ? 
+          `WHERE ${searchDto.month ? `toYear(StartDate) = {monthYear:UInt32} AND toMonth(StartDate) = {monthNum:UInt32}` : '1=1'} ${citizenIdFilter} ${keywordFilter}` : 
+          ''}
       ),
       filtered_tests AS (
         SELECT DISTINCT
@@ -221,6 +241,7 @@ export class PatientService {
         p.Gender as gender,
         p.Barcode as barcode,
         p.Address as address,
+        p.citizenID as citizenID,
         MAX(f_all.DateReceived) as lastTestDate,
         COUNT(f_all.TestKey) as totalTests,
         ft.DoctorName as doctorName
@@ -229,7 +250,7 @@ export class PatientService {
       JOIN FactGeneticTestResult f_all ON ft.PatientKey = f_all.PatientKey
       GROUP BY 
         p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, 
-        p.Barcode, p.Address, ft.DoctorName
+        p.Barcode, p.Address, p.citizenID, ft.DoctorName
       ORDER BY ${orderByClause}
       LIMIT {limit:UInt32} OFFSET {offset:UInt32}
     `;
@@ -237,10 +258,12 @@ export class PatientService {
     // Count query for pagination
     const countQuery = `
       WITH latest_patient_data AS (
-        SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address,
+        SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address, citizenID,
                ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
         FROM DimPatient
-        ${searchDto.month ? `WHERE toYear(StartDate) = {monthYear:UInt32} AND toMonth(StartDate) = {monthNum:UInt32}` : ''}
+        ${searchDto.month || searchDto.citizenid || searchDto.keyword ? 
+          `WHERE ${searchDto.month ? `toYear(StartDate) = {monthYear:UInt32} AND toMonth(StartDate) = {monthNum:UInt32}` : '1=1'} ${citizenIdFilter} ${keywordFilter}` : 
+          ''}
       ),
       filtered_tests AS (
         SELECT DISTINCT

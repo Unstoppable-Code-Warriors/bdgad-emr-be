@@ -18,6 +18,14 @@ export class PatientSearchDto {
   barcode?: string;
 
   @IsOptional()
+  @IsString()
+  citizenid?: string;
+
+  @IsOptional()
+  @IsString()
+  keyword?: string; // Search by name or citizenID
+
+  @IsOptional()
   @IsDateString()
   dateFrom?: string;
 

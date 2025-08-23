@@ -33,6 +33,7 @@ describe('PatientController', () => {
         gender: 'Male',
         barcode: 'BC001',
         address: '123 Main St',
+        citizenID: '123456789012',
         lastTestDate: '2024-01-15',
         totalTests: 5,
         doctorName: 'Dr. Smith',
@@ -52,6 +53,7 @@ describe('PatientController', () => {
     patientKey: 1,
     patientSourceId: 'PS001',
     citizenId: '123456789012',
+    citizenID: '123456789012',
     fullName: 'John Doe',
     dateOfBirth: '1990-01-01',
     gender: 'Male',
@@ -167,10 +169,31 @@ describe('PatientController', () => {
         limit: 10,
         name: 'Jane',
         barcode: 'BC002',
+        citizenid: '123456789012',
         dateFrom: '2024-01-01',
         dateTo: '2024-01-31',
         testType: 'Genetics',
         diagnosis: 'Normal',
+        sortBy: 'name',
+        sortOrder: 'ASC',
+      };
+
+      patientService.searchPatients.mockResolvedValue(mockSearchResponse);
+
+      const result = await controller.searchPatients(mockUser, searchDto);
+
+      expect(result).toEqual(mockSearchResponse);
+      expect(patientService.searchPatients).toHaveBeenCalledWith(
+        mockUser.id,
+        searchDto,
+      );
+    });
+
+    it('should handle search with keyword filter', async () => {
+      const searchDto: PatientSearchDto = {
+        page: 1,
+        limit: 10,
+        keyword: 'John', // Should match both name and citizenID
         sortBy: 'name',
         sortOrder: 'ASC',
       };
