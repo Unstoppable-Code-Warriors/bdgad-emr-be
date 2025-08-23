@@ -12,6 +12,7 @@ import { PatientSearchDto } from './dto/patient-search.dto';
 import { DashboardStatsDto } from './dto/dashboard-stats.dto';
 import { TestResultListResponse, TestResultDetailsDto } from './dto/test-result.dto';
 import { BdgadTestListResponse, BdgadTestDetailsDto } from './dto/bdgad-test.dto';
+import { PatientByMonthYearResponse } from './dto/patient-response.dto';
 
 @Controller('patient')
 @UseGuards(AuthGuard)
@@ -63,6 +64,31 @@ export class PatientController {
     @Query() statsDto: DashboardStatsDto,
   ) {
     return this.patientService.getDashboardStats(user.id, statsDto);
+  }
+
+  @Get('month-year-stats')
+  async getPatientByMonthYear(
+    @User() user: UserInfo,
+  ): Promise<PatientByMonthYearResponse> {
+    console.log('=== PatientController.getPatientByMonthYear START ===');
+    console.log('User info:', { userId: user.id, userName: user.name });
+
+    if (!user.id || typeof user.id !== 'number') {
+      console.error('Invalid user ID:', user.id);
+      throw new Error('Invalid user authentication');
+    }
+
+    try {
+      // Use user.id as doctorId to filter results by doctor
+      const result = await this.patientService.getPatientByMonthYear(user.id);
+      console.log('=== PatientController.getPatientByMonthYear END ===');
+      return result;
+    } catch (error) {
+      console.error('=== PatientController.getPatientByMonthYear ERROR ===');
+      console.error('Error in controller:', error);
+      console.error('=== PatientController.getPatientByMonthYear ERROR END ===');
+      throw error;
+    }
   }
 
   @Get('test-results/:testRunKey')
