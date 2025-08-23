@@ -14,6 +14,7 @@ export class TestResultDetailsDto {
     dateOfBirth?: string;
     gender?: string;
     address?: string;
+    barcode?: string;
   };
 }
 

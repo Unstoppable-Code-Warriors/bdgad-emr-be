@@ -720,7 +720,8 @@ export class PatientService {
           p.FullName,
           p.DateOfBirth,
           p.Gender,
-          p.Address
+          p.Address,
+          p.Barcode
         FROM FactGeneticTestResult f
         LEFT JOIN DimDate d ON f.DateReceivedKey = d.DateKey
         LEFT JOIN DimTestRun tr ON f.TestRunKey = tr.TestRunKey
@@ -774,6 +775,7 @@ export class PatientService {
           dateOfBirth: row.DateOfBirth,
           gender: row.Gender,
           address: row.Address,
+          barcode: row.Barcode,
         },
       };
 
@@ -918,7 +920,8 @@ export class PatientService {
         p.FullName,
         p.DateOfBirth,
         p.Gender,
-        p.Address
+        p.Address,
+        p.Barcode
       FROM FactGeneticTestResult f
       LEFT JOIN DimDate d1 ON f.DateReceivedKey = d1.DateKey
       LEFT JOIN DimDate d2 ON toUInt64(formatDateTime(f.DateReceived, '%Y%m%d')) = d2.DateKey
@@ -960,6 +963,7 @@ export class PatientService {
         dateOfBirth: row.DateOfBirth,
         gender: row.Gender,
         address: row.Address,
+        barcode: row.Barcode,
       },
       labCodes: labCodes,
     };
