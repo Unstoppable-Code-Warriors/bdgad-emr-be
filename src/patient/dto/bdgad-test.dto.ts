@@ -14,6 +14,7 @@ export class BdgadTestDetailsDto {
     dateOfBirth?: string;
     gender?: string;
     address?: string;
+    barcode?: string;
   };
   labCodes: any[];
 }
