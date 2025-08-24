@@ -38,6 +38,21 @@ export class PatientSearchDto {
   month?: string; // Format: YYYY-MM
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(12)
+  
+  folderMonth?: number; // Filter by folder month (1-12)
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1900)
+  @Max(3000)
+  folderYear?: number; // Filter by folder year
+
+  @IsOptional()
   @IsString()
   testType?: string;
 

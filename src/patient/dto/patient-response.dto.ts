@@ -146,3 +146,18 @@ export interface DashboardStats {
     count: number;
   }>;
 }
+
+export interface PatientMonthlyStats {
+  month: number;
+  total: number;
+}
+
+export interface PatientYearlyStats {
+  year: number;
+  total: number;
+  months: PatientMonthlyStats[];
+}
+
+export interface PatientByMonthYearResponse {
+  data: PatientYearlyStats[];
+}

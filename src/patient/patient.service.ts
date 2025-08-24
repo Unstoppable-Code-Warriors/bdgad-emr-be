@@ -10,6 +10,9 @@ import {
   TestResult,
   TestHistoryItem,
   PatientExtendedInfo,
+  PatientByMonthYearResponse,
+  PatientYearlyStats,
+  PatientMonthlyStats,
 } from './dto/patient-response.dto';
 import {
   TestResultSummaryDto,
@@ -160,6 +163,23 @@ export class PatientService {
       console.log('Added diagnosis filter:', queryParams.diagnosis);
     }
 
+    // Handle folderMonth and folderYear filters using DateReceivedKey and DimDate
+    if (searchDto.folderMonth || searchDto.folderYear) {
+      console.log('Processing folder date filters:', { folderMonth: searchDto.folderMonth, folderYear: searchDto.folderYear });
+      
+      if (searchDto.folderYear) {
+        filterConditions.push('dd.Year = {folderYear:UInt32}');
+        queryParams.folderYear = searchDto.folderYear;
+        console.log('Added folderYear filter:', queryParams.folderYear);
+      }
+      
+      if (searchDto.folderMonth) {
+        filterConditions.push('dd.Month = {folderMonth:UInt32}');
+        queryParams.folderMonth = searchDto.folderMonth;
+        console.log('Added folderMonth filter:', queryParams.folderMonth);
+      }
+    }
+
     // Handle month filter - this will be applied to patient StartDate, separate from test date filters
     let monthFilter = '';
     if (searchDto.month) {
@@ -231,6 +251,7 @@ export class PatientService {
         JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
         LEFT JOIN DimTest t ON f.TestKey = t.TestKey
         LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+        ${searchDto.folderMonth || searchDto.folderYear ? 'LEFT JOIN DimDate dd ON f.DateReceivedKey = dd.DateKey' : ''}
         WHERE pr.DoctorId = {doctorId:UInt32}
         ${additionalFilters}
       )
@@ -272,6 +293,7 @@ export class PatientService {
         JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
         LEFT JOIN DimTest t ON f.TestKey = t.TestKey
         LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+        ${searchDto.folderMonth || searchDto.folderYear ? 'LEFT JOIN DimDate dd ON f.DateReceivedKey = dd.DateKey' : ''}
         WHERE pr.DoctorId = {doctorId:UInt32}
         ${additionalFilters}
       )
@@ -992,5 +1014,122 @@ export class PatientService {
     };
 
     return bdgadTest;
+  }
+
+  /**
+   * Get patient statistics by month and year filtered by doctor
+   */
+  async getPatientByMonthYear(doctorId: number): Promise<PatientByMonthYearResponse> {
+    console.log('=== PatientService.getPatientByMonthYear START ===');
+    console.log('Doctor ID:', doctorId);
+
+    try {
+      // First, get current year and month from DimDate (max values available)
+      const dateQuery = `SELECT MAX(Year) as current_year, MAX(Month) as current_month FROM DimDate`;
+      const dateResult = await this.clickhouseService.query(dateQuery);
+      
+      let currentYear = 2025;
+      let currentMonth = 8;
+      
+      if (dateResult.data && Array.isArray(dateResult.data) && dateResult.data.length > 0) {
+        currentYear = dateResult.data[0].current_year;
+        currentMonth = dateResult.data[0].current_month;
+      }
+
+      console.log('Current date from DimDate:', { currentYear, currentMonth });
+
+      // Validate doctorId
+      if (!doctorId || doctorId <= 0) {
+        throw new Error(`Invalid doctor ID: ${doctorId}`);
+      }
+
+      // Query to get patient count by year and month filtered by doctor
+      const query = `
+        SELECT 
+          d.Year,
+          d.Month,
+          COUNT(DISTINCT f.PatientKey) as patient_count
+        FROM FactGeneticTestResult f
+        JOIN DimDate d ON f.DateReceivedKey = d.DateKey
+        JOIN DimProvider p ON f.ProviderKey = p.ProviderKey
+        WHERE p.DoctorId = ${doctorId}
+          AND d.Year <= ${currentYear} 
+          AND (d.Year < ${currentYear} OR d.Month <= ${currentMonth})
+        GROUP BY d.Year, d.Month
+        ORDER BY d.Year, d.Month
+      `;
+
+      console.log('Executing query:', query);
+      
+      const result = await this.clickhouseService.query(query);
+      console.log('Raw query result:', JSON.stringify(result, null, 2));
+
+      // Process the results to group by year
+      const yearlyStatsMap = new Map<number, PatientYearlyStats>();
+
+      if (result.data && Array.isArray(result.data)) {
+        for (const row of result.data) {
+          const year = Number(row.Year);
+          const month = Number(row.Month);
+          const count = Number(row.patient_count);
+
+
+
+          if (!yearlyStatsMap.has(year)) {
+            yearlyStatsMap.set(year, {
+              year: year,
+              total: 0,
+              months: []
+            });
+          }
+
+          const yearlyStats = yearlyStatsMap.get(year)!;
+          yearlyStats.total += count;
+          yearlyStats.months.push({
+            month: month,
+            total: count
+          });
+        }
+      }
+
+      // Convert map to array and fill missing months for current year
+      const yearlyStatsArray: PatientYearlyStats[] = Array.from(yearlyStatsMap.values());
+
+      // For each year, ensure all months up to current month (for current year) or 12 (for past years) are included
+      yearlyStatsArray.forEach(yearStats => {
+        const maxMonth = yearStats.year === currentYear ? currentMonth : 12;
+        const existingMonths = new Set(yearStats.months.map(m => m.month));
+
+        // Add missing months with 0 count
+        for (let month = 1; month <= maxMonth; month++) {
+          if (!existingMonths.has(month)) {
+            yearStats.months.push({
+              month: month,
+              total: 0
+            });
+          }
+        }
+
+        // Sort months
+        yearStats.months.sort((a, b) => a.month - b.month);
+      });
+
+      // Sort years
+      yearlyStatsArray.sort((a, b) => a.year - b.year);
+
+      const response: PatientByMonthYearResponse = {
+        data: yearlyStatsArray
+      };
+
+      console.log('Final response:', JSON.stringify(response, null, 2));
+      console.log('=== PatientService.getPatientByMonthYear END ===');
+
+      return response;
+    } catch (error) {
+      console.error('=== PatientService.getPatientByMonthYear ERROR ===');
+      console.error('Error:', error);
+      console.error('=== PatientService.getPatientByMonthYear ERROR END ===');
+      throw error;
+    }
   }
 }
