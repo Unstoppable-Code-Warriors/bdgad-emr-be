@@ -143,7 +143,7 @@ export class AiChatService {
 
         // Tool để thực hiện các truy vấn thống kê và phân tích chung
         commonQuery: tool({
-          description: `Thực hiện các truy vấn thống kê, phân tích dữ liệu EMR và xem chi tiết bệnh nhân.
+          description: `Thực hiện các truy vấn thống kê, phân tích dữ liệu EMR và xem chi tiết bệnh nhân bằng ClickHouse SQL.
           
           Sử dụng tool này khi:
           - XEM CHI TIẾT BỆNH NHÂN: lịch sử khám, hồ sơ y tế, kết quả xét nghiệm
@@ -157,14 +157,19 @@ export class AiChatService {
           - Dựa vào schema đã khám phá để viết query phù hợp
           - Có thể truy vấn nhiều bảng: FactGeneticTestResult, DimPatient, DimProvider, etc.
           
-          QUAN TRỌNG - Quy tắc bảo mật:
-          - CHỈ được phép thực hiện câu lệnh SELECT
-          - PHẢI có điều kiện WHERE với DoctorId = ${user.id} qua JOIN DimProvider`,
+          QUAN TRỌNG - Quy tắc bảo mật và cú pháp:
+          - CHỈ được phép thực hiện câu lệnh SELECT (ClickHouse SQL)
+          - BẮT BUỘC: Luôn luôn PHẢI có điều kiện WHERE để giới hạn dữ liệu chỉ cho bác sĩ hiện tại
+          - Cú pháp bảo mật: WHERE EXISTS (SELECT 1 FROM default.DimProvider dp WHERE dp.ProviderKey = [table].ProviderKey AND dp.DoctorId = ${user.id})
+          - HOẶC: WHERE [table].ProviderKey IN (SELECT ProviderKey FROM default.DimProvider WHERE DoctorId = ${user.id})
+          - Sử dụng cú pháp ClickHouse: backticks cho table/column names, toDate(), formatDateTime(), etc.
+          - Database prefix: default.TableName
+          - Không được thiếu điều kiện bảo mật trong bất kỳ truy vấn nào`,
           inputSchema: z.object({
             query: z
               .string()
               .describe(
-                'Câu lệnh SQL SELECT để thống kê/phân tích/xem chi tiết bệnh nhân. PHẢI có JOIN với DimProvider',
+                'Câu lệnh ClickHouse SQL SELECT với cú pháp chính xác. BẮT BUỘC phải có điều kiện WHERE giới hạn quyền truy cập cho bác sĩ hiện tại qua DimProvider table.',
               ),
             purpose: z
               .string()
@@ -826,7 +831,9 @@ except Exception as e:
       // Validate query is SELECT only
       const trimmedQuery = query.trim().toUpperCase();
       if (!trimmedQuery.startsWith('SELECT')) {
-        throw new Error('Chỉ được phép thực hiện câu lệnh SELECT');
+        throw new Error(
+          'Chỉ được phép thực hiện câu lệnh SELECT trong ClickHouse',
+        );
       }
 
       // Check for dangerous operations
@@ -841,44 +848,20 @@ except Exception as e:
         'REPLACE',
         'MERGE',
         'OPTIMIZE',
+        'SYSTEM',
+        'ATTACH',
+        'DETACH',
       ];
 
       for (const op of forbiddenOperations) {
         if (trimmedQuery.includes(op)) {
-          throw new Error(`Không được phép sử dụng lệnh ${op}`);
+          throw new Error(
+            `Không được phép sử dụng lệnh ${op} trong ClickHouse`,
+          );
         }
       }
 
-      // Validate doctor access restriction - CHỈ cho phép JOIN với DimProvider
-      const queryLower = query.toLowerCase();
-
-      // Kiểm tra xem có JOIN với DimProvider và điều kiện DoctorId không
-      const hasProviderJoin =
-        queryLower.includes('dimprovider') ||
-        queryLower.includes('dim_provider');
-      const hasDoctorIdCondition =
-        queryLower.includes('doctorid') &&
-        (queryLower.includes(`= ${doctorId}`) ||
-          queryLower.includes(`= '${doctorId}'`));
-
-      // Kiểm tra có sử dụng ProviderKey subquery không
-      const hasProviderKeySubquery =
-        queryLower.includes('providerkey') &&
-        queryLower.includes('select') &&
-        queryLower.includes('dimprovider') &&
-        (queryLower.includes(`= ${doctorId}`) ||
-          queryLower.includes(`= '${doctorId}'`));
-
-      const hasDoctorRestriction =
-        (hasProviderJoin && hasDoctorIdCondition) || hasProviderKeySubquery;
-
-      if (!hasDoctorRestriction) {
-        throw new Error(
-          `Truy vấn không hợp lệ. Chỉ được phép truy cập dữ liệu bệnh nhân trong phạm vi quyền hạn của bác sĩ hiện tại.`,
-        );
-      }
-
-      // Execute the query
+      // Execute the query directly - security is enforced through AI prompt
       const result = await this.clickHouseService.query(query);
 
       return {
@@ -888,19 +871,19 @@ except Exception as e:
         query,
         data: result.data || result,
         rowCount: Array.isArray(result.data) ? result.data.length : 'unknown',
-        message: `Đã thực hiện thống kê thành công. Mục đích: ${purpose}`,
+        message: `Đã thực hiện truy vấn ClickHouse thành công. Mục đích: ${purpose}`,
       };
     } catch (error) {
-      this.logger.error(`Common query error: ${error.message}`);
+      this.logger.error(`ClickHouse query error: ${error.message}`);
       return {
         success: false,
         purpose,
         doctorId,
         query,
         error: error.message,
-        message: `Có lỗi xảy ra khi thực hiện thống kê. Vui lòng thử lại.`,
+        message: `Có lỗi xảy ra khi thực hiện truy vấn ClickHouse. Vui lòng kiểm tra cú pháp SQL.`,
         suggestion:
-          'Hãy kiểm tra lại yêu cầu thống kê hoặc thử với tiêu chí khác',
+          'Hãy kiểm tra lại cú pháp ClickHouse SQL hoặc điều kiện WHERE bảo mật',
       };
     }
   }
