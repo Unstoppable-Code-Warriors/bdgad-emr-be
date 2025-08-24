@@ -230,6 +230,36 @@ describe('PatientController', () => {
       );
     });
 
+    it('should handle unlimited search with keyword', async () => {
+      const searchDto: PatientSearchDto = {
+        keyword: 'John',
+        unlimitedSearch: true,
+        sortBy: 'name',
+        sortOrder: 'ASC',
+      };
+
+      const unlimitedSearchResponse = {
+        ...mockSearchResponse,
+        pagination: {
+          ...mockSearchResponse.pagination,
+          isUnlimitedSearch: true,
+          totalPages: 1,
+          hasNext: false,
+          hasPrev: false,
+        },
+      };
+
+      patientService.searchPatients.mockResolvedValue(unlimitedSearchResponse);
+
+      const result = await controller.searchPatients(mockUser, searchDto);
+
+      expect(result).toEqual(unlimitedSearchResponse);
+      expect(patientService.searchPatients).toHaveBeenCalledWith(
+        mockUser.id,
+        searchDto,
+      );
+    });
+
     it('should handle empty search results', async () => {
       const searchDto: PatientSearchDto = {
         page: 1,
