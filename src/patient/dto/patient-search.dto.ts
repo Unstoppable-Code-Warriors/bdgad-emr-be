@@ -42,7 +42,6 @@ export class PatientSearchDto {
   @IsNumber()
   @Min(1)
   @Max(12)
-  
   folderMonth?: number; // Filter by folder month (1-12)
 
   @IsOptional()
@@ -70,8 +69,12 @@ export class PatientSearchDto {
   @Type(() => Number)
   @IsNumber()
   @Min(1)
-  @Max(1000)
+  @Max(10000)
   limit?: number = 20;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  unlimitedSearch?: boolean = false; // Allow unlimited search when searching by keyword
 
   @IsOptional()
   @IsString()

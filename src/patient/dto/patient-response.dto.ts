@@ -125,6 +125,7 @@ export interface PatientSearchResponse {
     totalPages: number;
     hasNext: boolean;
     hasPrev: boolean;
+    isUnlimitedSearch?: boolean; // Flag to indicate if unlimited search was used
   };
 }
 

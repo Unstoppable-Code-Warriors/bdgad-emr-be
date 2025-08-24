@@ -73,7 +73,7 @@ export class PatientService {
 
     const {
       page = 1,
-      limit = 100,
+      limit = 1000000,
       sortBy = 'lastTestDate',
       sortOrder = 'DESC',
     } = searchDto;
