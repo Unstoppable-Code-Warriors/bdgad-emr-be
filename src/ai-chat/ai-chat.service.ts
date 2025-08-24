@@ -155,7 +155,7 @@ export class AiChatService {
           WORKFLOW CHI TIẾT BỆNH NHÂN:
           - Là BƯỚC 2 sau khi đã dùng exploreClickHouseSchema
           - Dựa vào schema đã khám phá để viết query phù hợp
-          - Có thể truy vấn nhiều bảng: Fact, DimPatient, DimProvider, etc.
+          - Có thể truy vấn nhiều bảng: FactGeneticTestResult, DimPatient, DimProvider, etc.
           
           QUAN TRỌNG - Quy tắc bảo mật:
           - CHỈ được phép thực hiện câu lệnh SELECT
