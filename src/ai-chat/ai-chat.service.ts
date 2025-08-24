@@ -43,7 +43,14 @@ export class AiChatService {
           - Danh sách các bảng trong database
           - Cấu trúc cột của các bảng liên quan đến bệnh nhân
           - Tìm hiểu mối quan hệ giữa bác sĩ và bệnh nhân (DoctorId field)
-          - Hiểu các bảng chứa lịch sử khám, xét nghiệm, thuốc, etc.`,
+          - Hiểu các bảng chứa lịch sử khám, xét nghiệm, thuốc, etc.
+          
+          CẤU TRÚC DỮ LIỆU QUAN TRỌNG:
+          - DimTestRun: chứa thông tin chi tiết từng lần khám của bệnh nhân
+          - DimTestRun.EHR_url: cột chứa chi tiết hồ sơ y tế theo từng lần khám
+          - FactGeneticTestResult: dữ liệu các lần khám
+          - DimPatient: thông tin cơ bản bệnh nhân
+          - DimProvider: thông tin bác sĩ và quyền truy cập`,
           inputSchema: z.object({
             action: z
               .enum(['list_tables', 'describe_table'])
@@ -155,7 +162,12 @@ export class AiChatService {
           WORKFLOW CHI TIẾT BỆNH NHÂN:
           - Là BƯỚC 2 sau khi đã dùng exploreClickHouseSchema
           - Dựa vào schema đã khám phá để viết query phù hợp
-          - Có thể truy vấn nhiều bảng: FactGeneticTestResult, DimPatient, DimProvider, etc.
+          - Có thể truy vấn nhiều bảng: FactGeneticTestResult, DimPatient, DimProvider, DimTestRun, etc.
+          
+          THÔNG TIN CHI TIẾT BỆNH NHÂN:
+          - DimTestRun.EHR_url: chứa thông tin chi tiết hồ sơ y tế của từng lần khám
+          - Để xem chi tiết lịch sử khám của bệnh nhân, cần JOIN với DimTestRun và lấy EHR_url
+          - DimTestRun có thể chứa nhiều records cho mỗi bệnh nhân (theo từng lần khám)
           
           QUAN TRỌNG - Quy tắc bảo mật và cú pháp:
           - CHỈ được phép thực hiện câu lệnh SELECT (ClickHouse SQL)
@@ -169,7 +181,7 @@ export class AiChatService {
             query: z
               .string()
               .describe(
-                'Câu lệnh ClickHouse SQL SELECT với cú pháp chính xác. BẮT BUỘC phải có điều kiện WHERE giới hạn quyền truy cập cho bác sĩ hiện tại qua DimProvider table.',
+                'Câu lệnh ClickHouse SQL SELECT với cú pháp chính xác. BẮT BUỘC phải có điều kiện WHERE giới hạn quyền truy cập cho bác sĩ hiện tại qua DimProvider table. Để xem chi tiết lịch sử khám bệnh nhân, JOIN với DimTestRun và lấy EHR_url.',
               ),
             purpose: z
               .string()
