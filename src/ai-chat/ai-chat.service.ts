@@ -33,24 +33,22 @@ export class AiChatService {
         // Tool để khám phá schema của ClickHouse
         exploreClickHouseSchema: tool({
           description: `Khám phá cấu trúc schema của ClickHouse để hiểu các bảng và cột có sẵn.
-          Sử dụng tool này TRƯỚC TIÊN để biết được cấu trúc dữ liệu trước khi tìm kiếm bệnh nhân.
-
-          Các thông tin sẽ được khám phá:
-          - Danh sách các databases
+          
+          Sử dụng tool này khi:
+          - Bác sĩ yêu cầu xem thông tin chi tiết bệnh nhân (lịch sử khám, hồ sơ y tế)
+          - Cần hiểu cấu trúc dữ liệu trước khi truy vấn thông tin phức tạp
+          - Là BƯỚC 1 trong workflow xem chi tiết bệnh nhân
+          
+          Có thể gọi nhiều lần để khám phá đầy đủ:
           - Danh sách các bảng trong database
           - Cấu trúc cột của các bảng liên quan đến bệnh nhân
-          - Tìm hiểu mối quan hệ giữa bác sĩ và bệnh nhân (DoctorId field)`,
+          - Tìm hiểu mối quan hệ giữa bác sĩ và bệnh nhân (DoctorId field)
+          - Hiểu các bảng chứa lịch sử khám, xét nghiệm, thuốc, etc.`,
           inputSchema: z.object({
             action: z
-              .enum(['list_databases', 'list_tables', 'describe_table'])
+              .enum(['list_tables', 'describe_table'])
               .describe(
                 'Hành động khám phá: liệt kê databases, tables, hoặc mô tả cấu trúc table',
-              ),
-            database: z
-              .string()
-              .optional()
-              .describe(
-                'Tên database (bắt buộc khi action là list_tables hoặc describe_table)',
               ),
             tableName: z
               .string()
@@ -59,25 +57,22 @@ export class AiChatService {
                 'Tên bảng cần mô tả (bắt buộc khi action là describe_table)',
               ),
           }),
-          execute: async ({ action, database, tableName }) => {
-            return await this.executeClickHouseExploration(
-              action,
-              database,
-              tableName,
-            );
+          execute: async ({ action, tableName }) => {
+            return await this.executeClickHouseExploration(action, tableName);
           },
         }),
 
         // Tool để tìm kiếm bệnh nhân và trả về danh sách
         searchPatients: tool({
-          description: `Tìm kiếm danh sách bệnh nhân trong hệ thống EMR với nhiều tiêu chí linh hoạt.
+          description: `Tìm kiếm cơ bản bệnh nhân trong hệ thống EMR với nhiều tiêu chí linh hoạt.
           
           Sử dụng tool này khi:
-          - Người dùng yêu cầu "danh sách bệnh nhân"
+          - Tìm kiếm, đếm số lượng bệnh nhân cơ bản
           - Tìm kiếm bệnh nhân theo tên, CMND, giới tính
           - Tìm theo độ tuổi (khoảng năm sinh)
           - Tìm theo số lần khám (khoảng từ X đến Y lần)
           - Tìm bệnh nhân có khám trong khoảng thời gian cụ thể
+          - KHÔNG dùng khi cần xem chi tiết thông tin bệnh nhân
           
           Các tính năng tìm kiếm:
           - Hỗ trợ khoảng ngày sinh (fromDob, toDob)
@@ -148,13 +143,19 @@ export class AiChatService {
 
         // Tool để thực hiện các truy vấn thống kê và phân tích chung
         commonQuery: tool({
-          description: `Thực hiện các truy vấn thống kê và phân tích dữ liệu EMR.
+          description: `Thực hiện các truy vấn thống kê, phân tích dữ liệu EMR và xem chi tiết bệnh nhân.
           
           Sử dụng tool này khi:
+          - XEM CHI TIẾT BỆNH NHÂN: lịch sử khám, hồ sơ y tế, kết quả xét nghiệm
           - Đếm tổng số bệnh nhân, xét nghiệm, etc.
           - Thống kê theo thời gian, giới tính, độ tuổi
           - Phân tích xu hướng, báo cáo
-          - Các truy vấn SELECT không cần trả về danh sách bệnh nhân chi tiết
+          - Các truy vấn SELECT phức tạp mà searchPatients không đủ khả năng
+          
+          WORKFLOW CHI TIẾT BỆNH NHÂN:
+          - Là BƯỚC 2 sau khi đã dùng exploreClickHouseSchema
+          - Dựa vào schema đã khám phá để viết query phù hợp
+          - Có thể truy vấn nhiều bảng: Fact, DimPatient, DimProvider, etc.
           
           QUAN TRỌNG - Quy tắc bảo mật:
           - CHỈ được phép thực hiện câu lệnh SELECT
@@ -163,7 +164,7 @@ export class AiChatService {
             query: z
               .string()
               .describe(
-                'Câu lệnh SQL SELECT để thống kê/phân tích. PHẢI có JOIN với DimProvider',
+                'Câu lệnh SQL SELECT để thống kê/phân tích/xem chi tiết bệnh nhân. PHẢI có JOIN với DimProvider',
               ),
             purpose: z
               .string()
@@ -617,24 +618,13 @@ except Exception as e:
 
   // ClickHouse related methods
   private async executeClickHouseExploration(
-    action: 'list_databases' | 'list_tables' | 'describe_table',
-    database?: string,
+    action: 'list_tables' | 'describe_table',
     tableName?: string,
   ) {
     try {
       this.logger.log(`ClickHouse exploration: ${action}`);
-
+      const database = 'default'; // Assuming default database for simplicity
       switch (action) {
-        case 'list_databases':
-          const dbResult = await this.clickHouseService.query('SHOW DATABASES');
-          return {
-            success: true,
-            action: 'list_databases',
-            data: dbResult.data || dbResult,
-            message:
-              'Đã khám phá được các nguồn dữ liệu có sẵn trong hệ thống.',
-          };
-
         case 'list_tables':
           if (!database) {
             throw new Error('Thiếu thông tin database để tiếp tục khám phá');
