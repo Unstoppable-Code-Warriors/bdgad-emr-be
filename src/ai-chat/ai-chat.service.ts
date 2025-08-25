@@ -206,7 +206,7 @@ export class AiChatService {
       messages: [...createSystemMessages(excelFilePath), ...messages],
       temperature: 0.3, // Lower temperature for more consistent medical analysis
       maxOutputTokens: 1500, // Reduced to prevent excessive output
-      stopWhen: stepCountIs(4), // Reduced from 10 to 6: 4 analysis steps + 1 web search + 1 final report
+      stopWhen: stepCountIs(6), // Reduced from 10 to 6: 4 analysis steps + 1 web search + 1 final report
       tools: {
         // Web search tool for medical research - WITH USAGE TRACKING
         web_search_preview: openai.tools.webSearchPreview({
@@ -244,20 +244,20 @@ export class AiChatService {
 
         // STEP 2: Focus on Gene sheet analysis - count variants by gene
         createGeneAnalysisStrategy: tool({
-          description: `BƯỚC 2: Phân tích bảng Gene sheet để xác định các biến thể xuất hiện phổ biến.
+          description: `BƯỚC 2: Phân tích bảng Gene sheet để xác định top 3 biến thể xuất hiện nhiều nhất.
           
           Tập trung vào:
           - Bỏ qua row đầu tiên và row thứ 2 (headers)
           - Cột A: tên biến thể (gene/variant)
           - Cột C: dữ liệu hỗ trợ xác định mức độ phổ biến
-          - Xác định các biến thể xuất hiện phổ biến (không nêu con số cụ thể)
+          - Xác định top 3 biến thể xuất hiện nhiều nhất
           
-          Output: danh sách biến thể xuất hiện phổ biến`,
+          Output: danh sách top 3 biến thể xuất hiện nhiều nhất`,
           inputSchema: z.object({
             pythonCode: z
               .string()
               .describe(
-                'Python code để phân tích Gene sheet, bỏ qua 2 row đầu, xác định các biến thể xuất hiện phổ biến dựa trên cột A/C (không nêu số lượng cụ thể)',
+                'Python code để phân tích Gene sheet, bỏ qua 2 row đầu, xác định top 3 biến thể xuất hiện nhiều nhất dựa trên cột A/C',
               ),
             retryCount: z
               .number()
@@ -275,19 +275,19 @@ export class AiChatService {
 
         // STEP 3: Prepare search queries for top variants
         prepareVariantSearch: tool({
-          description: `BƯỚC 3: Chuẩn bị search queries cho các biến thể hàng đầu.
+          description: `BƯỚC 3: Chuẩn bị search queries cho top 3 biến thể xuất hiện nhiều nhất.
           
           Dựa vào kết quả từ bước 2:
-          - Tạo search queries cho top biến thể
+          - Tạo search queries cho top 3 biến thể
           - Focus vào clinical significance, disease associations
           - Generate queries phù hợp cho web search
           
-          Input: Top variants list từ bước 2`,
+          Input: Top 3 variants list từ bước 2`,
           inputSchema: z.object({
             pythonCode: z
               .string()
               .describe(
-                'Python code để chuẩn bị search queries cho top variants',
+                'Python code để chuẩn bị search queries cho top 3 biến thể xuất hiện nhiều nhất',
               ),
             retryCount: z
               .number()
@@ -461,7 +461,7 @@ except Exception as e:
           result: result.result,
           nextStep: 'variant_search',
           message:
-            '✅ Đã phân tích Gene sheet và thống kê top biến thể. Tiếp theo: chuẩn bị search queries.',
+            '✅ Đã phân tích Gene sheet và xác định top 3 biến thể xuất hiện nhiều nhất. Tiếp theo: chuẩn bị search queries.',
         };
       } else {
         throw new Error(
@@ -501,10 +501,10 @@ except Exception as e:
           stepName: 'variant_search',
           nextStep: null,
           message:
-            '✅ Đã chuẩn bị search queries cho top biến thể. Bây giờ thực hiện web search.',
+            '✅ Đã chuẩn bị search queries cho top 3 biến thể. Bây giờ thực hiện web search.',
           searchReady: true,
           instruction:
-            'Hãy sử dụng tool web_search_preview để tìm kiếm thông tin về các biến thể hàng đầu.',
+            'Hãy sử dụng tool web_search_preview để tìm kiếm thông tin về top 3 biến thể xuất hiện nhiều nhất.',
         };
       }
 
@@ -520,10 +520,10 @@ except Exception as e:
           result: result.result,
           nextStep: null,
           message:
-            '✅ Đã chuẩn bị xong search queries. Bây giờ thực hiện web search.',
+            '✅ Đã chuẩn bị xong search queries cho top 3 biến thể. Bây giờ thực hiện web search.',
           searchReady: true,
           instruction:
-            'Sử dụng web_search_preview để tìm kiếm thông tin về top biến thể.',
+            'Sử dụng web_search_preview để tìm kiếm thông tin về top 3 biến thể xuất hiện nhiều nhất.',
         };
       } else {
         throw new Error(`Variant search preparation failed: ${result.result}`);

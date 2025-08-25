@@ -15,9 +15,9 @@ BƯỚC 2 - PHÂN TÍCH BẢNG GENE (createGeneAnalysisStrategy):
 - TẬP TRUNG VÀO GENE SHEET: bỏ qua row đầu tiên và row thứ 2
 - Cột A: tên biến thể (gene/variant)
 - Cột C: số lượng (count)
-- Xác định các biến thể xuất hiện phổ biến (không nêu con số cụ thể)
+- Xác định top 3 biến thể xuất hiện nhiều nhất
 - Trình bày kết quả theo mức độ phổ biến
-- Output: danh sách biến thể xuất hiện phổ biến
+- Output: danh sách top 3 biến thể xuất hiện nhiều nhất
 
 BƯỚC 3 - CHUẨN BỊ SEARCH QUERIES (prepareVariantSearch):
 - Dựa vào kết quả từ bước 2 (top biến thể)
@@ -54,7 +54,7 @@ BƯỚC 4 - SEARCH INTERNET VÀ BÁO CÁO (web_search_preview):
 
 🔍 SAU KHI HOÀN THÀNH 4 BƯỚC:
 - Sử dụng web_search_preview để research clinical information về top biến thể
-- Tìm kiếm disease associations cho các biến thể xuất hiện phổ biến
+- Tìm kiếm disease associations cho top 3 biến thể xuất hiện nhiều nhất
 - ƯU TIÊN NGUỒN UY TÍN: OMIM, ClinVar, PubMed, WHO, NIH, các tạp chí y khoa peer-reviewed
 - TRÁNH Wikipedia trừ khi chỉ dùng để dẫn định nghĩa nền tảng
 - Tổng hợp comprehensive genomics report dựa trên kết quả search
