@@ -18,26 +18,26 @@ export class DaytonaService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit() {
-    // this.daytona = new Daytona({
-    //   apiKey: this.configService.get('DAYTONA_API_KEY'),
-    // });
-    // this.sandbox = await this.daytona.create({
-    //   language: 'python',
-    //   image: Image.debianSlim('3.13'),
-    //   autoStopInterval: 0,
-    //   resources: {
-    //     cpu: 2, // 2 CPU cores
-    //     memory: 4, // 4GB RAM
-    //     disk: 4, // 4GB disk space
-    //   },
-    // });
-    // this.sandbox.process.executeCommand('pip install pandas');
-    // this.sandbox.process.executeCommand('pip install requests');
-    // this.sandbox.process.executeCommand('pip install openpyxl');
+    this.daytona = new Daytona({
+      apiKey: this.configService.get('DAYTONA_API_KEY'),
+    });
+    this.sandbox = await this.daytona.create({
+      language: 'python',
+      image: Image.debianSlim('3.13'),
+      autoStopInterval: 0,
+      resources: {
+        cpu: 2, // 2 CPU cores
+        memory: 4, // 4GB RAM
+        disk: 4, // 4GB disk space
+      },
+    });
+    this.sandbox.process.executeCommand('pip install pandas');
+    this.sandbox.process.executeCommand('pip install requests');
+    this.sandbox.process.executeCommand('pip install openpyxl');
   }
 
   async onModuleDestroy() {
-    if (this.sandbox) await this.sandbox.delete()
+    if (this.sandbox) await this.sandbox.delete();
   }
 
   public async executePythonCode(pythonCode: string) {
