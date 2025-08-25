@@ -36,7 +36,7 @@ export class MockEtlService {
       const downloadResult = await this.s3Service.downloadFileToLocal(
         this.vcfPath,
         tempDir,
-        `${body.analysis_id}_${Date.now()}.vcf.gz`,
+        `${body.analysis_id}_${body.patient_id}_${body.sample_name}_${Date.now()}.vcf.gz`,
       );
 
       tempFilePath = downloadResult.filePath;
