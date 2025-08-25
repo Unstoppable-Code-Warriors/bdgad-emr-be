@@ -206,7 +206,7 @@ export class AiChatService {
       messages: [...createSystemMessages(excelFilePath), ...messages],
       temperature: 0.3, // Lower temperature for more consistent medical analysis
       maxOutputTokens: 1500, // Reduced to prevent excessive output
-      stopWhen: stepCountIs(6), // Reduced from 10 to 6: 4 analysis steps + 1 web search + 1 final report
+      stopWhen: stepCountIs(4), // Reduced from 10 to 6: 4 analysis steps + 1 web search + 1 final report
       tools: {
         // Web search tool for medical research - WITH USAGE TRACKING
         web_search_preview: openai.tools.webSearchPreview({
@@ -244,21 +244,20 @@ export class AiChatService {
 
         // STEP 2: Focus on Gene sheet analysis - count variants by gene
         createGeneAnalysisStrategy: tool({
-          description: `BƯỚC 2: Phân tích bảng Gene sheet để thống kê top các biến thể.
+          description: `BƯỚC 2: Phân tích bảng Gene sheet để xác định các biến thể xuất hiện phổ biến.
           
           Tập trung vào:
           - Bỏ qua row đầu tiên và row thứ 2 (headers)
           - Cột A: tên biến thể (gene/variant)
-          - Cột C: số lượng (count)
-          - Thống kê top các biến thể dựa trên số lượng
-          - Sắp xếp giảm dần theo số lượng để tìm biến thể phổ biến nhất
+          - Cột C: dữ liệu hỗ trợ xác định mức độ phổ biến
+          - Xác định các biến thể xuất hiện phổ biến (không nêu con số cụ thể)
           
-          Output: danh sách top biến thể với số lượng tương ứng`,
+          Output: danh sách biến thể xuất hiện phổ biến`,
           inputSchema: z.object({
             pythonCode: z
               .string()
               .describe(
-                'Python code để phân tích Gene sheet, bỏ qua 2 row đầu, đếm biến thể theo cột A/C',
+                'Python code để phân tích Gene sheet, bỏ qua 2 row đầu, xác định các biến thể xuất hiện phổ biến dựa trên cột A/C (không nêu số lượng cụ thể)',
               ),
             retryCount: z
               .number()
