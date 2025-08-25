@@ -288,7 +288,7 @@ export class AiChatService {
           
           LLM tự generate Python code để:
           - Re-download Excel file: pd.read_excel(excel_file_path, sheet_name=None)
-          - Focus vào Variant sheet (có 53001 rows, 102 columns)
+          - Focus vào Variant sheet
           - QUAN TRỌNG: Columns có headers ở row đầu tiên, cần skip header rows nếu cần
           - Dynamic column detection: tìm columns có 'Gene', 'ClinVar', 'COSMIC', etc.
           - Pathogenic variants analysis: filter ClinVar significance

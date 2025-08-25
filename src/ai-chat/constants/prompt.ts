@@ -14,10 +14,14 @@ BƯỚC 1 - KHÁM PHÁ CẤU TRÚC (exploreFileStructure):
 BƯỚC 2 - CHIẾN LƯỢC PHÂN TÍCH TOÀN DIỆN (createAnalysisStrategy):  
 - GENERATE Python code để QUÉT TOÀN BỘ sheets và tạo comprehensive strategy
 - Code phải re-load file vì mỗi Python session riêng biệt  
+- TẬP TRUNG VÀO SHEET GENE: ưu tiên trích xuất bảng tổng hợp số lượng biến thể theo gene
+  * Giả định: cột A là mã gene, cột C là số lượng (count)
+  * Chuẩn hóa tên cột (case-insensitive), handle trường hợp khác tên/khác vị trí
+  * Tạo bảng (gene, count) và sắp xếp giảm dần theo count để tìm gene phổ biến nhất
 - PHÂN TÍCH SÂU TỪNG SHEET:
   * Info sheet: metadata, analysis parameters, software version, reference genome
   * Variant sheet: variant distribution, annotation completeness, quality metrics
-  * Gene sheet: gene categories, functional annotations, pathway involvement
+  * Gene sheet: gene categories, functional annotations, pathway involvement + đếm số lượng theo gene
   * Sample sheet: sample metadata, demographics, sequencing statistics
   * Mapping sheet: alignment stats, coverage metrics, quality scores
   * Error sheet (nếu có): failed annotations, problematic variants
@@ -25,7 +29,7 @@ BƯỚC 2 - CHIẾN LƯỢC PHÂN TÍCH TOÀN DIỆN (createAnalysisStrategy):
 - DETECT DATA QUALITY: missing values, inconsistencies, annotation gaps
 - LẬP COMPREHENSIVE STRATEGY: multi-layer analysis plan cho tất cả sheets
 - PRIORITIZE ANALYSES: clinical significance → functional impact → population frequency
-- OUTPUT: detailed strategy với specific steps cho từng data layer
+- OUTPUT: detailed strategy với specific steps cho từng data layer, bao gồm top gene theo count từ Gene sheet
 - Stream comprehensive strategy về frontend
 
 BƯỚC 3 - THỰC HIỆN PHÂN TÍCH (executeGenomicsAnalysis):
@@ -37,11 +41,12 @@ BƯỚC 3 - THỰC HIỆN PHÂN TÍCH (executeGenomicsAnalysis):
   * Gene analysis: functional categories, pathway analysis, disease associations
   * Sample analysis: demographics impact, sequencing quality correlation
   * Quality assessment: data completeness, annotation confidence scores
+  * XÁC NHẬN LẠI danh sách top gene dựa trên bảng Gene (A: gene, C: count)
 - QUAN TRỌNG: Handle openCRAVAT Excel format correctly:
   * Dynamic sheet detection và column mapping
   * Handle missing sheets hoặc columns gracefully
   * Use .loc[] và .copy() để avoid pandas warnings
-- OUTPUT comprehensive findings: multi-layer results với clinical context
+- OUTPUT comprehensive findings: multi-layer results với clinical context, kèm gene phổ biến nhất và số lượng
 - Auto-retry nếu Python code có lỗi
 - Stream comprehensive analysis results về frontend
 
@@ -49,6 +54,7 @@ BƯỚC 4 - CHUẨN BỊ TÌM KIẾM (prepareWebSearch):
 - GENERATE Python code để extract và summarize findings
 - Dựa trên analysis results từ bước 3
 - Generate search queries từ key findings
+- ƯU TIÊN TẠO TRUY VẤN WEB CHO GENE PHỔ BIẾN NHẤT từ Gene sheet (đếm theo cột C)
 - Provide instructions cho clinical research
 - Stream preparation results về frontend
 
@@ -77,13 +83,14 @@ BƯỚC 4 - CHUẨN BỊ TÌM KIẾM (prepareWebSearch):
   * Sheet-by-sheet content analysis và statistical summary
   * Cross-sheet relationship mapping (variants ↔ genes ↔ samples)
   * Data quality assessment (missing values, inconsistencies)
-  * Comprehensive analysis plan với priorities cho từng layer
+  * Comprehensive analysis plan với priorities cho từng layer, KÈM bảng (gene, count) đã sắp xếp
 - For analysis step (bước 3): execute theo comprehensive strategy từ bước 2
 - Output structured results với clinical context và confidence levels
 
 🔍 SAU KHI HOÀN THÀNH 4 BƯỚC:
 - Sử dụng web_search_preview CHỈ MỘT LẦN để research clinical information
-- Tìm kiếm disease associations cho key genes trong 1 lần search duy nhất
+- Tìm kiếm disease associations cho gene phổ biến nhất (và tối đa vài gene tiếp theo nếu cần) trong 1 lần search tổng hợp
+- ƯU TIÊN NGUỒN UY TÍN: OMIM, ClinVar, PubMed, WHO, NIH, các tạp chí y khoa peer-reviewed; HẠN CHẾ hoặc TRÁNH Wikipedia trừ khi chỉ dùng để dẫn định nghĩa nền tảng
 - Tổng hợp comprehensive genomics report dựa trên kết quả search đó
 - TRÍCH DẪN NGUỒN ĐẦY ĐỦ cho mọi thông tin y khoa với format chuẩn
 - KHÔNG SEARCH THÊM NỮA sau khi đã có kết quả web search
@@ -143,6 +150,7 @@ File kết quả openCRAVAT (định dạng Excel) đã được cung cấp tạ
 🔬 OPENCRAVAT FILE FORMAT SPECIFICS:
 - Sheets: Info, Variant (53001 rows), Gene, Sample, Mapping  
 - Variant sheet: 102 columns với headers có thể ở row đầu tiên
+- Gene sheet: cột A là mã gene, cột C là số lượng biến thể theo từng gene (cần map linh hoạt theo tên cột)
 - Key columns: 'Gene', 'ClinVar', 'COSMIC', 'Position', 'Chromosome'
 - ClinVar values: 'Pathogenic', 'Likely pathogenic', 'Benign', etc.
 - Code phải handle header rows và column name variations
@@ -160,6 +168,7 @@ BƯỚC 1: exploreFileStructure → NGAY LẬP TỨC tiếp tục BƯỚC 2
 BƯỚC 2: createAnalysisStrategy → NGAY LẬP TỨC tiếp tục BƯỚC 3
 - Dựa trên cấu trúc đã khám phá, tạo chiến lược phân tích
 - Determine primary sheet và analysis priorities  
+- ƯU TIÊN TRÍCH XUẤT bảng (gene, count) từ Gene sheet (A: gene, C: count), sắp xếp giảm dần để tìm gene phổ biến nhất
 - Plan specific analyses based on available data
 - KHÔNG DỪNG, tiếp tục bước 3
 
@@ -167,12 +176,15 @@ BƯỚC 3: executeGenomicsAnalysis → NGAY LẬP TỨC tiếp tục BƯỚC 4
 - Generate và execute Python code theo strategy
 - Thực hiện phân tích pathogenic variants, genes, consequences
 - Extract key findings (genes, diseases) cho bước search
+- XÁC NHẬN gene phổ biến nhất dựa trên Gene sheet (A/C) để phục vụ web search
 - TỰ ĐỘNG RETRY nếu code bị lỗi
 - KHÔNG DỪNG, tiếp tục bước 4
 
 BƯỚC 4: prepareWebSearch → NGAY LẬP TỨC gọi web_search_preview CHỈ MỘT LẦN
 - Chuẩn bị cho việc search internet
 - Generate search queries từ analysis results
+- TẠO TRUY VẤN cho gene phổ biến nhất: "[GENE] disease association clinical significance pathogenic variants"
+- ƯU TIÊN NGUỒN UY TÍN (OMIM, ClinVar, PubMed, WHO, NIH); HẠN CHẾ Wikipedia
 - Provide search instructions với key genes và diseases
 - SAU ĐÓ CHỈ GỌI web_search_preview MỘT LẦN DUY NHẤT
 
@@ -181,8 +193,8 @@ BƯỚC 4: prepareWebSearch → NGAY LẬP TỨC gọi web_search_preview CHỈ 
 ===== AUTO WEB SEARCH CHỈ MỘT LẦN SAU BƯỚC 4 =====
 
 Tự động sử dụng web_search_preview CHỈ MỘT LẦN để tìm kiếm (KHÔNG CHỜ USER):
-- Tìm kiếm comprehensive cho tất cả genes và diseases quan trọng trong 1 query
-- "[Key genes list] mutations disease association clinical significance pathogenic variants"
+- Tìm kiếm comprehensive cho gene phổ biến nhất (và tối đa vài gene tiếp theo nếu cần) trong 1 query
+- "[Top gene list (ngắn)] mutations disease association clinical significance pathogenic variants"
 - KHÔNG tìm kiếm riêng lẻ từng gene
 - KHÔNG tìm kiếm multiple lần cho different topics
 
@@ -207,11 +219,11 @@ NGUYÊN TẮC CHẠY TỰ ĐỘNG:
 
 🎯 EXPECTED OUTPUT: 
 1. Structure exploration results
-2. Analysis strategy
+2. Analysis strategy (bao gồm bảng (gene, count) sorted và gene phổ biến nhất)
 3. Genomics analysis findings  
-4. Web search preparation
-5. Disease association research (CHỈ MỘT LẦN SEARCH)
-6. Final comprehensive report với clinical recommendations
+4. Web search preparation (query nhắm gene phổ biến nhất)
+5. Disease association research (CHỈ MỘT LẦN SEARCH, nguồn uy tín)
+6. Final comprehensive report với clinical recommendations và citations đầy đủ
 7. Nếu dữ liệu không đủ: DỰ ĐOÁN THAM KHẢO dựa trên bệnh phổ biến ở Việt Nam
 
 📋 KẾT LUẬN CUỐI CÙNG:
