@@ -242,31 +242,23 @@ export class AiChatService {
           },
         }),
 
-        // STEP 2: Create comprehensive analysis strategy
-        createAnalysisStrategy: tool({
-          description: `BƯỚC 2: Tạo chiến lược phân tích TOÀN DIỆN cho tất cả sheets trong file.
+        // STEP 2: Focus on Gene sheet analysis - count variants by gene
+        createGeneAnalysisStrategy: tool({
+          description: `BƯỚC 2: Phân tích bảng Gene sheet để thống kê top các biến thể.
           
-          LLM tự generate Python code để PHÂN TÍCH SÂU:
-          - Re-download Excel file (vì mỗi Python session riêng biệt)
-          - QUÉT TOÀN BỘ sheets: Info, Variant, Gene, Sample, Mapping, Error (nếu có)
-          - Chi tiết phân tích TỪNG SHEET:
-            * Info sheet: metadata, analysis parameters, version info
-            * Variant sheet: variant counts, column mapping, data quality
-            * Gene sheet: gene annotations, functional categories
-            * Sample sheet: sample info, demographics, sequencing stats
-            * Mapping sheet: mapping statistics, coverage info
-          - Xác định data relationships giữa các sheets
-          - Phát hiện missing data, quality issues, inconsistencies
-          - Lập COMPREHENSIVE analysis strategy cho tất cả data layers
-          - Prioritize analyses: variants → genes → samples → clinical significance
-          - Output: detailed strategy với specific analysis steps cho mỗi sheet
+          Tập trung vào:
+          - Bỏ qua row đầu tiên và row thứ 2 (headers)
+          - Cột A: tên biến thể (gene/variant)
+          - Cột C: số lượng (count)
+          - Thống kê top các biến thể dựa trên số lượng
+          - Sắp xếp giảm dần theo số lượng để tìm biến thể phổ biến nhất
           
-          QUAN TRỌNG: Không chỉ focus vào Variant sheet mà phải hiểu TOÀN BỘ dataset`,
+          Output: danh sách top biến thể với số lượng tương ứng`,
           inputSchema: z.object({
             pythonCode: z
               .string()
               .describe(
-                'Python code do LLM generate để phân tích TOÀN BỘ sheets và tạo comprehensive strategy',
+                'Python code để phân tích Gene sheet, bỏ qua 2 row đầu, đếm biến thể theo cột A/C',
               ),
             retryCount: z
               .number()
@@ -276,32 +268,27 @@ export class AiChatService {
           }),
           execute: async ({ pythonCode, retryCount = 0 }) => {
             this.logger.log(
-              `Creating comprehensive analysis strategy with LLM code, retry: ${retryCount}`,
+              `Creating gene analysis strategy with LLM code, retry: ${retryCount}`,
             );
-            return await this.executeStrategyStep(pythonCode, retryCount);
+            return await this.executeGeneStrategyStep(pythonCode, retryCount);
           },
         }),
 
-        // STEP 3: Execute genomics analysis
-        executeGenomicsAnalysis: tool({
-          description: `BƯỚC 3: Thực hiện phân tích dữ liệu gen theo strategy từ bước 2.
+        // STEP 3: Prepare search queries for top variants
+        prepareVariantSearch: tool({
+          description: `BƯỚC 3: Chuẩn bị search queries cho các biến thể hàng đầu.
           
-          LLM tự generate Python code để:
-          - Re-download Excel file: pd.read_excel(excel_file_path, sheet_name=None)
-          - Focus vào Variant sheet
-          - QUAN TRỌNG: Columns có headers ở row đầu tiên, cần skip header rows nếu cần
-          - Dynamic column detection: tìm columns có 'Gene', 'ClinVar', 'COSMIC', etc.
-          - Pathogenic variants analysis: filter ClinVar significance
-          - Gene analysis: group by genes, count variants per gene
-          - Extract findings: genes list, diseases list, pathogenic count
-          - AVOID pandas warnings: use .loc[] and .copy() appropriately
+          Dựa vào kết quả từ bước 2:
+          - Tạo search queries cho top biến thể
+          - Focus vào clinical significance, disease associations
+          - Generate queries phù hợp cho web search
           
-          Expected output: key_genes list, pathogenic_diseases list, analysis summary`,
+          Input: Top variants list từ bước 2`,
           inputSchema: z.object({
             pythonCode: z
               .string()
               .describe(
-                'Python code do LLM generate để phân tích genomics - phải handle openCRAVAT format correctly',
+                'Python code để chuẩn bị search queries cho top variants',
               ),
             retryCount: z
               .number()
@@ -311,38 +298,9 @@ export class AiChatService {
           }),
           execute: async ({ pythonCode, retryCount = 0 }) => {
             this.logger.log(
-              `Executing genomics analysis with LLM code, retry: ${retryCount}`,
+              `Preparing variant search with LLM code, retry: ${retryCount}`,
             );
-            return await this.executeAnalysisStep(pythonCode, retryCount);
-          },
-        }),
-
-        // STEP 4: Prepare for web search
-        prepareWebSearch: tool({
-          description: `BƯỚC 4: Chuẩn bị thông tin cho web search về disease associations.
-          
-          LLM tự generate Python code để:
-          - Sử dụng analysis results từ bước 3
-          - Extract key genes và pathogenic diseases
-          - Generate search queries suggestions
-          - Provide structure cho final report
-          
-          Input: Analysis results từ bước 3`,
-          inputSchema: z.object({
-            pythonCode: z
-              .string()
-              .describe('Python code do LLM generate để chuẩn bị web search'),
-            retryCount: z
-              .number()
-              .optional()
-              .default(0)
-              .describe('Số lần retry nếu có lỗi'),
-          }),
-          execute: async ({ pythonCode, retryCount = 0 }) => {
-            this.logger.log(
-              `Preparing web search with LLM code, retry: ${retryCount}`,
-            );
-            return await this.executeSearchStep(pythonCode, retryCount);
+            return await this.executeVariantSearchStep(pythonCode, retryCount);
           },
         }),
 
@@ -454,9 +412,9 @@ except Exception as e:
           success: true,
           stepName: 'explore',
           result: result.result,
-          nextStep: 'strategy',
+          nextStep: 'gene_analysis',
           message:
-            '✅ Đã khám phá xong cấu trúc file. Tiếp theo: lập chiến lược phân tích.',
+            '✅ Đã khám phá xong cấu trúc file. Tiếp theo: phân tích Gene sheet.',
         };
       } else {
         throw new Error(`Exploration failed: ${result.result}`);
@@ -482,7 +440,7 @@ except Exception as e:
     }
   }
 
-  private async executeStrategyStep(
+  private async executeGeneStrategyStep(
     pythonCode?: string,
     retryCount: number = 0,
   ) {
@@ -490,145 +448,104 @@ except Exception as e:
       // If no pythonCode provided, return error (LLM should generate it)
       if (!pythonCode) {
         throw new Error(
-          'No Python code provided for strategy step. LLM should generate the analysis strategy code.',
+          'No Python code provided for gene analysis strategy step. LLM should generate the analysis strategy code.',
         );
       }
 
-      this.logger.log('Executing LLM-generated strategy code');
+      this.logger.log('Executing LLM-generated gene analysis strategy code');
       const result = await this.daytonaService.executePythonCode(pythonCode);
 
       if (result.exitCode === 0) {
         return {
           success: true,
-          stepName: 'strategy',
+          stepName: 'gene_analysis',
           result: result.result,
-          nextStep: 'analyze',
+          nextStep: 'variant_search',
           message:
-            '✅ Đã phân tích toàn diện tất cả sheets và lập comprehensive strategy. Tiếp theo: thực hiện multi-layer analysis.',
+            '✅ Đã phân tích Gene sheet và thống kê top biến thể. Tiếp theo: chuẩn bị search queries.',
         };
       } else {
-        throw new Error(`Strategy planning failed: ${result.result}`);
+        throw new Error(
+          `Gene analysis strategy planning failed: ${result.result}`,
+        );
       }
     } catch (error) {
       if (retryCount < 3) {
         return {
           success: false,
-          stepName: 'strategy',
+          stepName: 'gene_analysis',
           error: error.message,
-          nextStep: 'strategy',
+          nextStep: 'gene_analysis',
           retryCount: retryCount + 1,
-          message: `❌ Lỗi phân tích comprehensive strategy (lần ${retryCount + 1}). LLM cần generate code mới để quét toàn bộ sheets...`,
+          message: `❌ Lỗi phân tích Gene sheet (lần ${retryCount + 1}). LLM cần generate code mới để phân tích Gene sheet...`,
         };
       }
       return {
         success: false,
-        stepName: 'strategy',
+        stepName: 'gene_analysis',
         error: error.message,
         nextStep: null,
-        message: '❌ Không thể tạo comprehensive strategy sau 3 lần thử.',
+        message: '❌ Không thể phân tích Gene sheet sau 3 lần thử.',
       };
     }
   }
 
-  private async executeAnalysisStep(
+  private async executeVariantSearchStep(
     pythonCode?: string,
     retryCount: number = 0,
   ) {
-    try {
-      // If no pythonCode provided, return error (LLM should generate it)
-      if (!pythonCode) {
-        throw new Error(
-          'No Python code provided for analysis step. LLM should generate the genomics analysis code.',
-        );
-      }
-
-      this.logger.log('Executing LLM-generated analysis code');
-      const result = await this.daytonaService.executePythonCode(pythonCode);
-
-      if (result.exitCode === 0) {
-        return {
-          success: true,
-          stepName: 'analyze',
-          result: result.result,
-          nextStep: 'search',
-          message:
-            '✅ Đã phân tích xong dữ liệu gen. Tiếp theo: tìm kiếm thông tin bệnh lý.',
-        };
-      } else {
-        throw new Error(`Analysis failed: ${result.result}`);
-      }
-    } catch (error) {
-      if (retryCount < 3) {
-        return {
-          success: false,
-          stepName: 'analyze',
-          error: error.message,
-          nextStep: 'analyze',
-          retryCount: retryCount + 1,
-          message: `❌ Lỗi phân tích dữ liệu (lần ${retryCount + 1}). LLM cần generate code mới và thử lại...`,
-        };
-      }
-      return {
-        success: false,
-        stepName: 'analyze',
-        error: error.message,
-        nextStep: null,
-        message: '❌ Không thể phân tích dữ liệu sau 3 lần thử.',
-      };
-    }
-  }
-
-  private async executeSearchStep(pythonCode?: string, retryCount: number = 0) {
     try {
       // If no pythonCode provided, return simple search ready status
       if (!pythonCode) {
         return {
           success: true,
-          stepName: 'search',
+          stepName: 'variant_search',
           nextStep: null,
           message:
-            '✅ Đã hoàn thành phân tích. Bây giờ cần search thông tin bệnh lý trên internet.',
+            '✅ Đã chuẩn bị search queries cho top biến thể. Bây giờ thực hiện web search.',
           searchReady: true,
           instruction:
-            'Hãy sử dụng tool web_search_preview để tìm kiếm thông tin về các gen và bệnh lý đã được phát hiện.',
+            'Hãy sử dụng tool web_search_preview để tìm kiếm thông tin về các biến thể hàng đầu.',
         };
       }
 
-      this.logger.log('Executing LLM-generated search preparation code');
+      this.logger.log(
+        'Executing LLM-generated variant search preparation code',
+      );
       const result = await this.daytonaService.executePythonCode(pythonCode);
 
       if (result.exitCode === 0) {
         return {
           success: true,
-          stepName: 'search',
+          stepName: 'variant_search',
           result: result.result,
           nextStep: null,
           message:
-            '✅ Đã chuẩn bị xong thông tin search. Bây giờ thực hiện web search.',
+            '✅ Đã chuẩn bị xong search queries. Bây giờ thực hiện web search.',
           searchReady: true,
           instruction:
-            'Sử dụng web_search_preview để tìm kiếm disease associations.',
+            'Sử dụng web_search_preview để tìm kiếm thông tin về top biến thể.',
         };
       } else {
-        throw new Error(`Search preparation failed: ${result.result}`);
+        throw new Error(`Variant search preparation failed: ${result.result}`);
       }
     } catch (error) {
       if (retryCount < 3) {
         return {
           success: false,
-          stepName: 'search',
+          stepName: 'variant_search',
           error: error.message,
-          nextStep: 'search',
+          nextStep: 'variant_search',
           retryCount: retryCount + 1,
-          message: `❌ Lỗi chuẩn bị search (lần ${retryCount + 1}). LLM cần generate code mới và thử lại...`,
+          message: `❌ Lỗi chuẩn bị search queries (lần ${retryCount + 1}). LLM cần generate code mới và thử lại...`,
         };
       }
       return {
         success: false,
-        stepName: 'search',
+        stepName: 'variant_search',
         error: error.message,
         nextStep: null,
-        message: '❌ Không thể chuẩn bị search sau 3 lần thử.',
+        message: '❌ Không thể chuẩn bị search queries sau 3 lần thử.',
       };
     }
   }
