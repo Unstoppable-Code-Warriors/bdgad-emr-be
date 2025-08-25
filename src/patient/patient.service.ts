@@ -117,7 +117,7 @@ export class PatientService {
     // keyword can match either FullName or citizenID
     let keywordFilter = '';
     if (searchDto.keyword) {
-      keywordFilter = `AND (FullName ILIKE {keyword:String} OR citizenID LIKE {keywordCitizenId:String})`;
+      keywordFilter = `AND (FullName ILIKE {keyword:String} OR citizenID ILIKE {keywordCitizenId:String})`;
       queryParams.keyword = `%${searchDto.keyword}%`;
       queryParams.keywordCitizenId = `%${searchDto.keyword}%`;
       console.log('Added keyword filter:', queryParams.keyword);
