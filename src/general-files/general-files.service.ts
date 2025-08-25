@@ -180,6 +180,7 @@ export class GeneralFilesService {
         gf.file_name,
         gf.file_type,
         gf.file_size,
+        gf.file_path,
         gf.uploaded_at,
         gf.send_emr_at
       FROM general_files gf 
@@ -208,6 +209,7 @@ export class GeneralFilesService {
         file_name: file.file_name,
         file_type: file.file_type,
         file_size: file.file_size,
+        file_path: file.file_path,
         uploaded_at: file.uploaded_at,
         send_emr_at: file.send_emr_at,
       });
