@@ -13,6 +13,7 @@ import * as path from 'path';
 export class MockEtlService {
   private readonly logger = new Logger(MockEtlService.name);
   private vcfPath: string;
+  private tumorVcfPath: string;
 
   constructor(
     @Inject('ETL_SERVICE') private readonly etlClient: ClientProxy,
@@ -21,20 +22,23 @@ export class MockEtlService {
     private readonly s3Service: S3Service,
   ) {
     this.vcfPath = this.configService.get<string>('VCF_PATH') || '';
+    this.tumorVcfPath = this.configService.get<string>('TUMOR_VCF_PATH') || '';
   }
 
   async startAnalyze(body: MockEtlReqDto) {
+    this.logger.log('startAnalyze', body);
     let tempFilePath: string | null = null;
+    const analysisVcfPath = body.tumor ? this.tumorVcfPath : this.vcfPath;
 
     try {
       // 1. Download VCF file from S3 to local temp folder
       this.logger.log(
-        `Starting analysis for ${body.analysis_id}, downloading VCF from: ${this.vcfPath}`,
+        `Starting analysis for ${body.analysis_id}, downloading VCF from: ${analysisVcfPath}`,
       );
 
       const tempDir = path.join(process.cwd(), 'temp');
       const downloadResult = await this.s3Service.downloadFileToLocal(
-        this.vcfPath,
+        analysisVcfPath,
         tempDir,
         `${body.analysis_id}_${body.patient_id}_${body.sample_name}_${Date.now()}.vcf.gz`,
       );

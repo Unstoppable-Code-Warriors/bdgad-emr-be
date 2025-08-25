@@ -1,4 +1,11 @@
-import { IsEnum, IsNotEmpty, IsNumber, IsString } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 enum Sex {
   MALE = 'XY',
@@ -45,4 +52,8 @@ export class MockEtlReqDto {
   @IsString()
   @IsNotEmpty()
   email: string;
+
+  @IsBoolean()
+  @IsOptional()
+  tumor?: boolean;
 }
