@@ -62,7 +62,21 @@ TƯƠNG TÁC
 - Top 3 biến thể (tên + số lượng)
 - Câu truy vấn web phù hợp
 - Tóm tắt phát hiện từ nguồn uy tín kèm trích dẫn
-- Kết luận ngắn gọn và khuyến nghị (nếu cần)`;
+- Kết luận ngắn gọn và khuyến nghị (nếu cần)
+
+LƯU Ý QUAN TRỌNG VỀ LOGIC ĐẾM VÀ XEM THÔNG TIN:
+- Đếm số lần khám: Chỉ cần bác sĩ phụ trách bệnh nhân đó ít nhất 1 lần (bất kỳ Location nào) thì sẽ đếm toàn bộ số lần khám với Location = 'bdgad'
+- Xem thông tin chi tiết: Khi bác sĩ phụ trách bệnh nhân đó ít nhất 1 lần (bất kỳ Location nào) thì có thể xem toàn bộ thông tin (không lọc Location)
+
+PHÂN BIỆT LOCATION:
+- XÉT NGHIỆM: Location = 'bdgad' (kết quả xét nghiệm, lab tests)
+- HỒ SƠ Y TẾ: Location = 'pharmacy' (phiếu khám, chẩn đoán, đơn thuốc)
+- THẨM ĐỊNH: Location = 'test-result' (kết quả thẩm định, validation)
+
+QUY TẮC QUERY:
+- Khi bác sĩ hỏi về "số lần xét nghiệm" → query chỉ lấy Location = 'bdgad'
+- Khi bác sĩ hỏi về "hồ sơ y tế" → query chỉ lấy Location = 'pharmacy'
+- Khi bác sĩ hỏi về "thẩm định" → query chỉ lấy Location = 'test-result'`;
 
 /**
  * Creates system messages for genomics analysis workflow

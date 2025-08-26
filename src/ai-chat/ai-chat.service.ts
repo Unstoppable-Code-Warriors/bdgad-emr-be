@@ -56,7 +56,12 @@ export class AiChatService {
           - DimTestRun.EHR_url: cột chứa chi tiết hồ sơ y tế/thông tin y tế
           - FactGeneticTestResult: dữ liệu các lần khám
           - DimPatient: thông tin cơ bản bệnh nhân
-          - DimProvider: thông tin bác sĩ và quyền truy cập`,
+          - DimProvider: thông tin bác sĩ và quyền truy cập
+          
+          PHÂN BIỆT LOCATION:
+          - XÉT NGHIỆM: Location = 'bdgad' (kết quả xét nghiệm, lab tests)
+          - HỒ SƠ Y TẾ: Location = 'pharmacy' (phiếu khám, chẩn đoán, đơn thuốc)
+          - THẨM ĐỊNH: Location = 'test-result' (kết quả thẩm định, validation)`,
           inputSchema: z.object({
             action: z
               .enum(['list_tables', 'describe_table'])
@@ -94,6 +99,15 @@ export class AiChatService {
           - Hỗ trợ khoảng thời gian khám (fromVisitDate, toVisitDate)
           - Có thể kết hợp nhiều điều kiện
           - Khi không có tiêu chí nào: trả về tổng số bệnh nhân đang quản lý
+          
+          LOGIC ĐẾM SỐ LẦN KHÁM:
+          - Chỉ cần bác sĩ phụ trách bệnh nhân đó ít nhất 1 lần (bất kỳ Location nào) thì sẽ đếm toàn bộ số lần khám với Location = 'bdgad'
+          - Số lần khám được đếm dựa trên TestRunKey (không phân biệt Location trong đếm)
+          
+          PHÂN BIỆT LOCATION:
+          - XÉT NGHIỆM: Location = 'bdgad' (đây là những gì được đếm trong VisitCount)
+          - HỒ SƠ Y TẾ: Location = 'pharmacy' (không được đếm trong VisitCount)
+          - THẨM ĐỊNH: Location = 'test-result' (không được đếm trong VisitCount)
           
           TỰ ĐỘNG PHÁT HIỆN YÊU CẦU:
           - "tất cả bệnh nhân", "tất cả", "danh sách bệnh nhân" → tự động gọi tool với searchCriteria rỗng
@@ -184,6 +198,15 @@ export class AiChatService {
           - Nếu không chỉ định rõ → trả về toàn bộ lịch sử theo quyền bác sĩ (không lọc Location)
           - Có thể set tham số recordType = 'exam' | 'medical' | 'validation' để chỉ định rõ ràng
           
+          QUY TẮC PHÂN BIỆT:
+          - XÉT NGHIỆM: Location = 'bdgad' (kết quả xét nghiệm, lab tests)
+          - HỒ SƠ Y TẾ: Location = 'pharmacy' (phiếu khám, chẩn đoán, đơn thuốc)
+          - THẨM ĐỊNH: Location = 'test-result' (kết quả thẩm định, validation)
+          
+          LOGIC QUYỀN TRUY CẬP:
+          - Chỉ cần bác sĩ phụ trách bệnh nhân đó ít nhất 1 lần (bất kỳ Location nào) thì có thể xem toàn bộ thông tin
+          - Quyền truy cập được kiểm tra ở cấp độ bệnh nhân, không phụ thuộc vào Location cụ thể
+          
           WORKFLOW:
           - Bước 1: Gọi searchPatients để lấy danh sách và chọn bệnh nhân (lấy PatientKey)
           - Bước 2: Gọi tool này với PatientKey để lấy chi tiết hồ sơ
@@ -257,6 +280,17 @@ export class AiChatService {
           - DimTestRun.EHR_url: chứa thông tin chi tiết hồ sơ y tế của từng lần khám
           - Để xem chi tiết lịch sử khám của bệnh nhân, cần JOIN với DimTestRun và lấy EHR_url
           - DimTestRun có thể chứa nhiều records cho mỗi bệnh nhân (theo từng lần khám)
+          
+          LOGIC QUYỀN TRUY CẬP:
+          - Chỉ cần bác sĩ phụ trách bệnh nhân đó ít nhất 1 lần (bất kỳ Location nào) thì có thể xem toàn bộ thông tin
+          - Quyền truy cập được kiểm tra ở cấp độ bệnh nhân, không phụ thuộc vào Location cụ thể
+          
+          PHÂN BIỆT LOCATION TRONG TRUY VẤN:
+          - XÉT NGHIỆM: Location = 'bdgad' (kết quả xét nghiệm, lab tests)
+          - HỒ SƠ Y TẾ: Location = 'pharmacy' (phiếu khám, chẩn đoán, đơn thuốc)
+          - THẨM ĐỊNH: Location = 'test-result' (kết quả thẩm định, validation)
+          - Khi cần đếm số lần xét nghiệm: chỉ lấy Location = 'bdgad'
+          - Khi cần xem hồ sơ y tế: chỉ lấy Location = 'pharmacy'
           
           QUAN TRỌNG - Quy tắc bảo mật và cú pháp:
           - CHỈ được phép thực hiện câu lệnh SELECT (ClickHouse SQL)
@@ -808,7 +842,7 @@ finally:
 
       // Build JOIN conditions for visit date range and bdgad location
       const joinConds: string[] = [];
-      // Only count exam visits in search (Location = 'bdgad')
+      // Only count exam visits in search (Location = 'bdgad') - XÉT NGHIỆM
       joinConds.push(`lower(trim(BOTH ' ' FROM f.Location)) = 'bdgad'`);
       if (searchCriteria.fromVisitDate) {
         joinConds.push(
@@ -822,16 +856,16 @@ finally:
       }
       const onClause = joinConds.length ? `AND ${joinConds.join(' AND ')}` : '';
 
-      // Build HAVING clause for visit count range (use distinct visits by (TestRunKey, Location))
+      // Build HAVING clause for visit count range (use distinct visits by TestRunKey only for bdgad)
       const havingConditions: string[] = [];
       if (searchCriteria.minVisitCount) {
         havingConditions.push(
-          `countDistinct(f.TestRunKey, f.Location) >= ${searchCriteria.minVisitCount}`,
+          `countDistinct(f.TestRunKey) >= ${searchCriteria.minVisitCount}`,
         );
       }
       if (searchCriteria.maxVisitCount) {
         havingConditions.push(
-          `countDistinct(f.TestRunKey, f.Location) <= ${searchCriteria.maxVisitCount}`,
+          `countDistinct(f.TestRunKey) <= ${searchCriteria.maxVisitCount}`,
         );
       }
       const havingClause =
@@ -848,6 +882,7 @@ finally:
       `;
 
       // Build the optimized query - include authorized patients even with zero bdgad visits
+      // QUAN TRỌNG: Chỉ đếm số lần XÉT NGHIỆM (Location = 'bdgad')
       const query = `
         WITH authorized_patients AS (
           ${authorizedPatientsCTE}
@@ -859,7 +894,7 @@ finally:
           p.Gender as Gender,
           p.citizenID as citizenID,
           p.Address as Address,
-          countDistinct(f.TestRunKey, f.Location) as VisitCount,
+          countDistinct(f.TestRunKey) as VisitCount,
           MIN(f.DateReceived) as FirstVisitDate,
           MAX(f.DateReceived) as LastVisitDate
         FROM default.DimPatient p
@@ -917,7 +952,7 @@ finally:
 
       // Input already has patientKey resolved from searchPatients
 
-      // Authorize: doctor can see full history if they have at least 1 record with this patient
+      // Authorize: doctor can see full history if they have at least 1 record with this patient (any location)
       const authQuery = `
         SELECT count() AS c
         FROM default.FactGeneticTestResult f
@@ -1254,6 +1289,7 @@ finally:
       const patientKey = patients[0].PatientKey;
 
       // Step 2: count records filtered by Location and doctor restriction, join DimTestRun
+      // Note: Doctor authorization is checked at patient level (any location), but counting is done for specific location
       const baseSelect = includeList
         ? `
           SELECT 
