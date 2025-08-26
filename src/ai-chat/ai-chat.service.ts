@@ -301,17 +301,16 @@ export class AiChatService {
           },
         }),
 
-        // STEP 1: Explore file structure
+        // STEP 1: Explore Gene sheet structure
         exploreFileStructure: tool({
-          description: `BƯỚC 1: Khám phá cấu trúc file Excel openCRAVAT.
-
-          Phân tích:
-          - Tất cả sheets trong file Excel
-          - Columns và sample data trong mỗi sheet
-          - Identify key columns (gene, clinvar, cosmic, etc.)
-          - Tạo structure report cho bước tiếp theo
+          description: `BƯỚC 1: Khám phá Gene sheet trong file Excel openCRAVAT.
           
-          Luôn chạy bước này TRƯỚC TIÊN để hiểu cấu trúc file.`,
+          Mục tiêu:
+          - Xác định sheet có tên chứa 'Gene' (không phân biệt hoa thường) hoặc sheet phù hợp nhất
+          - Lấy danh sách các cột, số dòng, các cột gợi ý có chứa 'gene' và 'count'
+          - In ra duy nhất 1 dòng đánh dấu: GENE_SHEET_INFO_JSON: { ... } để bước 2 dùng
+          
+          Kết quả trả về sẽ bao gồm cấu trúc Gene sheet để LLM tạo Python cho bước 2.`,
           inputSchema: z.object({
             retryCount: z
               .number()
@@ -331,29 +330,27 @@ export class AiChatService {
           Yêu cầu:
           - Trong code Python, tải file excel từ url ${excelFilePath}
           Tập trung vào:
-          - Bỏ qua row đầu tiên và row thứ 2 (headers)
+          - Bỏ qua row đầu tiên (headers)
           - Cột A: tên biến thể (gene/variant)
           - Cột C: dữ liệu hỗ trợ xác định mức độ phổ biến
           - Xác định top 3 biến thể xuất hiện nhiều nhất
           
           Output: danh sách top 3 biến thể xuất hiện nhiều nhất`,
           inputSchema: z.object({
-            pythonCode: z
-              .string()
-              .describe(
-                `Python code có download OpenCRAVAT excel url ${excelFilePath} và phân tích Gene sheet, bỏ qua 2 row đầu, xác định top 3 biến thể xuất hiện nhiều nhất: Cột A là tên biến thể, Cột C là số lượng. Bắt buộc in ra 1 dòng theo format: TOP_VARIANTS_JSON: ["variant1", "variant2", "variant3"]`,
-              ),
             retryCount: z
               .number()
               .optional()
               .default(0)
               .describe('Số lần retry nếu có lỗi'),
           }),
-          execute: async ({ pythonCode, retryCount = 0 }) => {
+          execute: async ({ retryCount = 0 }) => {
             this.logger.log(
-              `Creating gene analysis strategy with LLM code, retry: ${retryCount}`,
+              `Running internal gene analysis step, retry: ${retryCount}`,
             );
-            return await this.executeGeneStrategyStep(pythonCode, retryCount);
+            return await this.executeGeneStrategyStep(
+              retryCount,
+              excelFilePath,
+            );
           },
         }),
 
@@ -442,73 +439,83 @@ export class AiChatService {
   ) {
     try {
       const exploreCode = `
-# BƯỚC 1: KHÁM PHÁ CẤU TRÚC FILE EXCEL
+# BƯỚC 1: KHÁM PHÁ GENE SHEET
 import pandas as pd
 import numpy as np
+import json
+import requests
+import tempfile
+import os
 
 excel_file_path = "${excelFilePath || ''}"
-print("🔍 BƯỚC 1: KHÁM PHÁ CẤU TRÚC FILE OPENCRAVAT")
+print("🔍 BƯỚC 1: KHÁM PHÁ GENE SHEET")
 print(f"📂 File: {excel_file_path}")
 
+def download_if_url(path: str) -> str:
+    if path.startswith('http://') or path.startswith('https://'):
+        r = requests.get(path, timeout=60)
+        r.raise_for_status()
+        tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+        tmp.write(r.content)
+        tmp.flush()
+        tmp.close()
+        return tmp.name
+    return path
+
+def find_gene_sheet(xls: pd.ExcelFile) -> str:
+    for s in xls.sheet_names:
+        if 'gene' in str(s).lower():
+            return s
+    return xls.sheet_names[0]
+
+tmp_path = None
 try:
-    # Load all sheets
-    excel_data = pd.read_excel(excel_file_path, sheet_name=None)
-    print(f"✅ File loaded successfully!")
-    print(f"📋 Sheets found: {list(excel_data.keys())}")
-    
-    structure_info = {}
-    
-    for sheet_name, sheet_data in excel_data.items():
-        print(f"\\n📊 Sheet '{sheet_name}':")
-        print(f"  - Rows: {len(sheet_data)}")
-        print(f"  - Columns: {len(sheet_data.columns)}")
-        
-        if len(sheet_data) > 0:
-            # Show first few column names
-            print(f"  - Column samples: {list(sheet_data.columns[:5])}")
-            
-            # Identify key columns
-            key_cols = []
-            for col in sheet_data.columns:
-                col_lower = col.lower()
-                if any(keyword in col_lower for keyword in [
-                    'gene', 'chrom', 'position', 'clinvar', 'cosmic',
-                    'significance', 'ontology', 'consequence', 'zygosity',
-                    'frequency', 'pathogenic', 'disease', 'af'
-                ]):
-                    key_cols.append(col)
-            
-            if key_cols:
-                print(f"  - Key columns: {key_cols}")
-            
-            structure_info[sheet_name] = {
-                'rows': len(sheet_data),
-                'columns': list(sheet_data.columns),
-                'key_columns': key_cols
-            }
-    
-    print(f"\\n✅ EXPLORATION COMPLETED")
-    print(f"Structure info saved for strategy planning.")
-    
-    # Save structure info for next steps
-    import json
-    globals()['file_structure'] = structure_info
-    
+    tmp_path = download_if_url(excel_file_path)
+    xls = pd.ExcelFile(tmp_path)
+    sheet_name = find_gene_sheet(xls)
+    df = pd.read_excel(tmp_path, sheet_name=sheet_name, header=1)
+
+    columns = [str(c) for c in df.columns]
+    rows = int(len(df))
+
+    gene_like = [c for c in columns if 'gene' in c.lower() or 'variant' in c.lower()]
+    count_like = [c for c in columns if 'count' in c.lower() or c.lower() in {'c'}]
+
+    info = {
+        'sheet_name': sheet_name,
+        'rows': rows,
+        'columns': columns,
+        'candidate_gene_columns': gene_like,
+        'candidate_count_columns': count_like,
+    }
+
+    print('GENE_SHEET_INFO_JSON: ' + json.dumps(info, ensure_ascii=False))
+
 except Exception as e:
-    print(f"❌ Error exploring file: {str(e)}")
+    print(f"❌ Error exploring Gene sheet: {e}")
     raise
+finally:
+    if tmp_path and tmp_path != excel_file_path and os.path.exists(tmp_path):
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
 `;
 
       const result = await this.daytonaService.executePythonCode(exploreCode);
 
       if (result.exitCode === 0) {
+        const geneSheetInfo = this.parseGeneSheetInfoFromPythonOutput(
+          result.result,
+        );
         return {
           success: true,
           stepName: 'explore',
           result: result.result,
+          geneSheetInfo,
           nextStep: 'gene_analysis',
           message:
-            '✅ Đã khám phá xong cấu trúc file. Tiếp theo: phân tích Gene sheet.',
+            '✅ Đã khám phá Gene sheet. Tiếp theo: LLM tạo code để lấy top biến thể.',
         };
       } else {
         throw new Error(`Exploration failed: ${result.result}`);
@@ -521,7 +528,7 @@ except Exception as e:
           error: error.message,
           nextStep: 'explore',
           retryCount: retryCount + 1,
-          message: `❌ Lỗi khám phá file (lần ${retryCount + 1}). Đang thử lại...`,
+          message: `❌ Lỗi khám phá Gene sheet (lần ${retryCount + 1}). Đang thử lại...`,
         };
       }
       return {
@@ -529,31 +536,94 @@ except Exception as e:
         stepName: 'explore',
         error: error.message,
         nextStep: null,
-        message: '❌ Không thể khám phá cấu trúc file sau 3 lần thử.',
+        message: '❌ Không thể khám phá Gene sheet sau 3 lần thử.',
       };
     }
   }
 
   private async executeGeneStrategyStep(
-    pythonCode?: string,
     retryCount: number = 0,
+    excelFilePath?: string,
   ) {
     try {
-      // If no pythonCode provided, return error (LLM should generate it)
-      if (!pythonCode) {
-        throw new Error(
-          'No Python code provided for gene analysis strategy step. LLM should generate the analysis strategy code.',
-        );
-      }
+      // Build internal deterministic Python if no code provided
+      const code = `
+# STEP 2: Gene sheet analysis — print TOP_VARIANTS_JSON
+import pandas as pd
+import numpy as np
+import json
+import requests
+import tempfile
+import os
 
-      this.logger.log('Executing LLM-generated gene analysis strategy code');
-      const result = await this.daytonaService.executePythonCode(pythonCode);
+EXCEL_URL = "${excelFilePath || ''}"
+
+def download_if_url(path: str) -> str:
+    if path.startswith('http://') or path.startswith('https://'):
+        r = requests.get(path, timeout=60)
+        r.raise_for_status()
+        tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+        tmp.write(r.content)
+        tmp.flush()
+        tmp.close()
+        return tmp.name
+    return path
+
+def find_gene_sheet(xls: pd.ExcelFile) -> str:
+    for s in xls.sheet_names:
+        if 'gene' in str(s).lower():
+            return s
+    return xls.sheet_names[0]
+
+local_path = None
+try:
+    local_path = download_if_url(EXCEL_URL)
+    xls = pd.ExcelFile(local_path)
+    sheet_name = find_gene_sheet(xls)
+    df = pd.read_excel(local_path, sheet_name=sheet_name, header=1)
+
+    # Use columns by position: A (0) as variant, C (2) as count-like
+    variant_col = df.columns[0]
+    count_col = df.columns[2] if len(df.columns) > 2 else df.columns[-1]
+
+    data = df[[variant_col, count_col]].copy()
+    data.columns = ['variant', 'count']
+    data['variant'] = data['variant'].astype(str).str.strip()
+
+    numeric = pd.to_numeric(data['count'], errors='ignore')
+    if str(numeric.dtype) == 'object':
+        # fallback: count each occurrence
+        data['ones'] = 1
+        agg = data.groupby('variant', dropna=False)['ones'].sum()
+    else:
+        data['count_num'] = pd.to_numeric(data['count'], errors='coerce').fillna(0)
+        agg = data.groupby('variant', dropna=False)['count_num'].sum()
+
+    agg = agg.sort_values(ascending=False)
+    top_variants = [str(v) for v in agg.head(3).index if isinstance(v, (str, int, float))]
+    top_variants = [v for v in top_variants if v and v.lower() not in {'nan', 'none'}][:3]
+
+    print('TOP_VARIANTS_JSON: ' + json.dumps(top_variants, ensure_ascii=False))
+
+except Exception as e:
+    print(f"❌ Error in gene analysis: {e}")
+    raise
+finally:
+    if local_path and local_path != EXCEL_URL and os.path.exists(local_path):
+        try:
+            os.remove(local_path)
+        except Exception:
+            pass
+`;
+
+      this.logger.log('Executing internal gene analysis Python code');
+      const result = await this.daytonaService.executePythonCode(code);
 
       if (result.exitCode === 0) {
         const variants = this.parseTopVariantsFromPythonOutput(result.result);
         if (!variants || variants.length === 0) {
           throw new Error(
-            'Không trích xuất được TOP_VARIANTS_JSON từ output Python. Vui lòng in ra dòng: TOP_VARIANTS_JSON: ["variant1", "variant2", "variant3"]',
+            'Không trích xuất được TOP_VARIANTS_JSON từ output Python. Vui lòng đảm bảo in ra: TOP_VARIANTS_JSON: ["variant1", "variant2", "variant3"]',
           );
         }
         return {
@@ -578,7 +648,7 @@ except Exception as e:
           error: error.message,
           nextStep: 'gene_analysis',
           retryCount: retryCount + 1,
-          message: `❌ Lỗi phân tích Gene sheet (lần ${retryCount + 1}). LLM cần generate code mới để phân tích Gene sheet...`,
+          message: `❌ Lỗi phân tích Gene sheet (lần ${retryCount + 1}). Đang thử lại...`,
         };
       }
       return {
@@ -1441,5 +1511,16 @@ except Exception as e:
       }
     } catch (_) {}
     return [];
+  }
+
+  private parseGeneSheetInfoFromPythonOutput(output: string): any | null {
+    try {
+      const markerRegex = /GENE_SHEET_INFO_JSON\s*:\s*(\{[\s\S]*\})/;
+      const m = markerRegex.exec(output);
+      if (m && m[1]) {
+        return JSON.parse(m[1]);
+      }
+    } catch (_) {}
+    return null;
   }
 }

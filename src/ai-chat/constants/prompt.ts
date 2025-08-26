@@ -9,8 +9,8 @@ QUY TRÌNH 4 BƯỚC
 - Kết quả dùng để định hướng bước 2
 
 2) createGeneAnalysisStrategy (Gene sheet)
-- Tập trung Gene sheet, bỏ qua 2 hàng đầu
-- Cột A: tên gene/variant; Cột C: số lượng
+- Tập trung Gene sheet, bỏ qua 1 hàng đầu
+- Cột A: Gene (tên gene/variant); Cột C: Number of Coding Variants (số lượng)
 - Trích xuất Top 3 biến thể xuất hiện nhiều nhất (giảm dần theo số lượng)
 - Output: danh sách 3 biến thể phổ biến nhất
 
@@ -49,8 +49,8 @@ HƯỚNG DẪN PHÂN TÍCH OPENCRAVAT (Excel):
 - Nếu đường dẫn là http/https: TẢI FILE VỀ TẠM THỜI trước khi đọc bằng pandas
 
 THỰC THI LIÊN TỤC
-1) exploreFileStructure: liệt kê sheets/columns, nhận diện Gene sheet (tải file nếu là URL)
-2) createGeneAnalysisStrategy: bắt buộc tải lại file excel (url: ${excelFilePath}) đọc Gene sheet, thống kê và lấy Top 3 theo cột C. BẮT BUỘC in ra đúng 1 dòng đánh dấu: TOP_VARIANTS_JSON: ["variant1", "variant2", "variant3"] để hệ thống parse.
+1) exploreFileStructure: liệt kê sheets/columns, nhận diện Gene sheet
+2) createGeneAnalysisStrategy: đọc Gene sheet (bỏ qua hàng đầu), tính Top 3 theo cột C và in TOP_VARIANTS_JSON
 3) prepareVariantSearch: KHÔNG chạy Python; nhận mảng 1-3 biến thể từ bước 2 và tạo truy vấn web theo template cố định (tập trung clinical significance, disease associations).
 4) web_search_preview: tra cứu từ nguồn y sinh uy tín, hạn chế Wikipedia, trích dẫn đầy đủ
 
