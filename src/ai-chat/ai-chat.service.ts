@@ -340,7 +340,7 @@ export class AiChatService {
             pythonCode: z
               .string()
               .describe(
-                'Python code để phân tích Gene sheet, bỏ qua 2 row đầu, xác định top 3 biến thể xuất hiện nhiều nhất dựa trên cột A/C',
+                `Python code có download OpenCRAVAT excel url ${excelFilePath} và phân tích Gene sheet, bỏ qua 2 row đầu, xác định top 3 biến thể xuất hiện nhiều nhất: Cột A là tên biến thể, Cột C là số lượng`,
               ),
             retryCount: z
               .number()
