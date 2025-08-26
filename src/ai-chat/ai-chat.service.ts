@@ -304,7 +304,7 @@ export class AiChatService {
         // STEP 1: Explore file structure
         exploreFileStructure: tool({
           description: `BƯỚC 1: Khám phá cấu trúc file Excel openCRAVAT.
-          
+
           Phân tích:
           - Tất cả sheets trong file Excel
           - Columns và sample data trong mỗi sheet
@@ -328,7 +328,8 @@ export class AiChatService {
         // STEP 2: Focus on Gene sheet analysis - count variants by gene
         createGeneAnalysisStrategy: tool({
           description: `BƯỚC 2: Phân tích bảng Gene sheet để xác định top 3 biến thể xuất hiện nhiều nhất.
-          
+          Yêu cầu:
+          - Trong code Python, tải file excel từ url ${excelFilePath}
           Tập trung vào:
           - Bỏ qua row đầu tiên và row thứ 2 (headers)
           - Cột A: tên biến thể (gene/variant)
