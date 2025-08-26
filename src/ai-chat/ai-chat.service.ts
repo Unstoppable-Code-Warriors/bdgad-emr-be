@@ -710,9 +710,9 @@ except Exception as e:
       // Build WHERE conditions
       const conditions: string[] = [];
 
-      // Always include doctor restriction
+      // Authorization: include patients where the doctor has at least one prior visit
       conditions.push(
-        `f.ProviderKey IN (SELECT ProviderKey FROM default.DimProvider WHERE DoctorId = ${doctorId})`,
+        `EXISTS (SELECT 1 FROM default.FactGeneticTestResult f2 INNER JOIN default.DimProvider dp2 ON f2.ProviderKey = dp2.ProviderKey WHERE f2.PatientKey = p.PatientKey AND dp2.DoctorId = ${doctorId})`,
       );
 
       if (searchCriteria.name) {
@@ -770,12 +770,12 @@ except Exception as e:
       const havingConditions: string[] = [];
       if (searchCriteria.minVisitCount) {
         havingConditions.push(
-          `COUNT(f.PatientKey) >= ${searchCriteria.minVisitCount}`,
+          `countDistinct((f.TestRunKey, f.Location)) >= ${searchCriteria.minVisitCount}`,
         );
       }
       if (searchCriteria.maxVisitCount) {
         havingConditions.push(
-          `COUNT(f.PatientKey) <= ${searchCriteria.maxVisitCount}`,
+          `countDistinct((f.TestRunKey, f.Location)) <= ${searchCriteria.maxVisitCount}`,
         );
       }
       const havingClause =
@@ -783,7 +783,7 @@ except Exception as e:
           ? `HAVING ${havingConditions.join(' AND ')}`
           : '';
 
-      // Build the optimized query - FIXED: Use INNER JOIN to get only patients with tests
+      // Build the optimized query - Deduplicate visits by (TestRunKey, Location) and count all visits (not limited to the doctor's own)
       const query = `
         SELECT 
           p.PatientKey as PatientKey,
@@ -792,12 +792,11 @@ except Exception as e:
           p.Gender as Gender,
           p.citizenID as citizenID,
           p.Address as Address,
-          COUNT(f.PatientKey) as VisitCount,
+          countDistinct((f.TestRunKey, f.Location)) as VisitCount,
           MIN(f.DateReceived) as FirstVisitDate,
           MAX(f.DateReceived) as LastVisitDate
         FROM default.DimPatient p
         INNER JOIN default.FactGeneticTestResult f ON p.PatientKey = f.PatientKey
-        INNER JOIN default.DimProvider dp ON f.ProviderKey = dp.ProviderKey
         WHERE ${whereClause}
         GROUP BY p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, p.citizenID, p.Address
         ${havingClause}
