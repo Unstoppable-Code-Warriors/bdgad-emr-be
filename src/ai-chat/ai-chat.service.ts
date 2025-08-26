@@ -95,6 +95,11 @@ export class AiChatService {
           - Có thể kết hợp nhiều điều kiện
           - Khi không có tiêu chí nào: trả về tổng số bệnh nhân đang quản lý
           
+          TỰ ĐỘNG PHÁT HIỆN YÊU CẦU:
+          - "tất cả bệnh nhân", "tất cả", "danh sách bệnh nhân" → tự động gọi tool với searchCriteria rỗng
+          - "có bao nhiêu bệnh nhân", "đang quản lý bao nhiêu" → tự động gọi tool với searchCriteria rỗng
+          - "liệt kê bệnh nhân" → tự động gọi tool với searchCriteria rỗng
+          
           QUAN TRỌNG: 
           - Sau khi gọi tool này, CHỈ trả lời số lượng bệnh nhân tìm được
           - KHÔNG đưa ra thông tin chi tiết của bệnh nhân
@@ -764,12 +769,12 @@ except Exception as e:
       // Build the optimized query - FIXED: Use INNER JOIN to get only patients with tests
       const query = `
         SELECT 
-          p.PatientKey,
-          p.FullName,
-          p.DateOfBirth,
-          p.Gender,
-          p.citizenID,
-          p.Address,
+          p.PatientKey as PatientKey,
+          p.FullName as FullName,
+          p.DateOfBirth as DateOfBirth,
+          p.Gender as Gender,
+          p.citizenID as citizenID,
+          p.Address as Address,
           COUNT(f.PatientKey) as VisitCount,
           MIN(f.DateReceived) as FirstVisitDate,
           MAX(f.DateReceived) as LastVisitDate
