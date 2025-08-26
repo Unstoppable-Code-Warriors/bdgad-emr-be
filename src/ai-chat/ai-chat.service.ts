@@ -24,7 +24,7 @@ export class AiChatService {
     const messages = convertToModelMessages(uiMessages);
 
     const result = streamText({
-      model: openai.responses('gpt-4.1-mini'),
+      model: openai.responses('gpt-4.1'),
       messages: [...createSystemDoctorMessages(user.id), ...messages],
       temperature: 0.3,
       maxOutputTokens: 2000,
