@@ -425,62 +425,40 @@ export class AiChatService {
   }
 
   private async executeExploreStep(
-    excelFilePath: string,
-    retryCount: number = 1,
+    excelFilePath?: string,
+    retryCount: number = 0,
   ) {
-    this.logger.log(`Executing explore step with excel file: ${excelFilePath}`);
-
     try {
-      const safeExcelPath = JSON.stringify(excelFilePath || '');
       const exploreCode = `
-# -*- coding: utf-8 -*-
-# STEP 1: EXPLORE OPENCRAVAT EXCEL FILE
+# BƯỚC 1: KHÁM PHÁ CẤU TRÚC FILE EXCEL
 import pandas as pd
 import numpy as np
-import os
-import tempfile
-from urllib.parse import urlparse
-from urllib.request import urlretrieve
 
-excel_file_path = ${safeExcelPath}
-print("STEP 1: EXPLORE OPENCRAVAT EXCEL FILE")
-print("File: {}".format(excel_file_path))
+excel_file_path = "${excelFilePath || ''}"
+print("🔍 BƯỚC 1: KHÁM PHÁ CẤU TRÚC FILE OPENCRAVAT")
+print(f"📂 File: {excel_file_path}")
 
 try:
-    # Normalize path: if URL, download to a temporary file before reading
-    local_path = excel_file_path
-    try:
-        parsed = urlparse(excel_file_path)
-        if parsed.scheme in ("http", "https"):
-            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
-            os.close(tmp_fd)
-            print("Downloading file from URL to a temporary location...")
-            urlretrieve(excel_file_path, tmp_path)
-            local_path = tmp_path
-            print("Downloaded: {}".format(local_path))
-    except Exception as url_err:
-        print("WARNING: Could not download file from URL, will try reading directly with pandas: {}".format(str(url_err)))
-
     # Load all sheets
-    excel_data = pd.read_excel(local_path, sheet_name=None)
-    print("File loaded successfully!")
-    print("Sheets found: {}".format(list(excel_data.keys())))
+    excel_data = pd.read_excel(excel_file_path, sheet_name=None)
+    print(f"✅ File loaded successfully!")
+    print(f"📋 Sheets found: {list(excel_data.keys())}")
     
     structure_info = {}
     
     for sheet_name, sheet_data in excel_data.items():
-        print("\nSheet '{}':".format(sheet_name))
-        print("  - Rows: {}".format(len(sheet_data)))
-        print("  - Columns: {}".format(len(sheet_data.columns)))
+        print(f"\\n📊 Sheet '{sheet_name}':")
+        print(f"  - Rows: {len(sheet_data)}")
+        print(f"  - Columns: {len(sheet_data.columns)}")
         
         if len(sheet_data) > 0:
             # Show first few column names
-            print("  - Column samples: {}".format(list(map(str, list(sheet_data.columns[:5])))))
+            print(f"  - Column samples: {list(sheet_data.columns[:5])}")
             
             # Identify key columns
             key_cols = []
             for col in sheet_data.columns:
-                col_lower = str(col).lower()
+                col_lower = col.lower()
                 if any(keyword in col_lower for keyword in [
                     'gene', 'chrom', 'position', 'clinvar', 'cosmic',
                     'significance', 'ontology', 'consequence', 'zygosity',
@@ -489,23 +467,23 @@ try:
                     key_cols.append(col)
             
             if key_cols:
-                print("  - Key columns: {}".format(list(map(str, key_cols))))
+                print(f"  - Key columns: {key_cols}")
             
             structure_info[sheet_name] = {
-                'rows': int(len(sheet_data)),
-                'columns': list(map(str, sheet_data.columns)),
-                'key_columns': list(map(str, key_cols))
+                'rows': len(sheet_data),
+                'columns': list(sheet_data.columns),
+                'key_columns': key_cols
             }
     
-    print("\nEXPLORATION COMPLETED")
-    print("Structure info saved for strategy planning.")
+    print(f"\\n✅ EXPLORATION COMPLETED")
+    print(f"Structure info saved for strategy planning.")
     
     # Save structure info for next steps
     import json
     globals()['file_structure'] = structure_info
     
 except Exception as e:
-    print("Error exploring file: {}".format(str(e)))
+    print(f"❌ Error exploring file: {str(e)}")
     raise
 `;
 
