@@ -759,6 +759,9 @@ except Exception as e:
         }
       }
 
+      // Only count exam visits in search (Location = 'bdgad')
+      conditions.push(`lower(trim(BOTH ' ' FROM f.Location)) = 'bdgad'`);
+
       const whereClause =
         conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
       const limit = searchCriteria.limit || 20;
@@ -788,7 +791,7 @@ except Exception as e:
         WHERE dp2.DoctorId = ${doctorId}
       `;
 
-      // Build the optimized query - dedupe visits and count all visits once authorized
+      // Build the optimized query - dedupe visits and count all exam visits once authorized
       const query = `
         WITH authorized_patients AS (
           ${authorizedPatientsCTE}
