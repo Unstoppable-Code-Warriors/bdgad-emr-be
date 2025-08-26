@@ -722,7 +722,7 @@ except Exception as e:
 
       if (searchCriteria.name) {
         conditions.push(
-          `LOWER(p.FullName) LIKE LOWER('%${searchCriteria.name.replace(/'/g, "''")}%')`,
+          `lowerUTF8(p.FullName) LIKE lowerUTF8('%${searchCriteria.name.replace(/'/g, "''")}%')`,
         );
       }
 
@@ -863,7 +863,7 @@ except Exception as e:
       const idConds: string[] = [];
       if (patientIdentifier.patientName) {
         idConds.push(
-          `LOWER(p.FullName) LIKE LOWER('%${patientIdentifier.patientName.replace(/'/g, "''")}%')`,
+          `lowerUTF8(p.FullName) LIKE lowerUTF8('%${patientIdentifier.patientName.replace(/'/g, "''")}%')`,
         );
       }
       if (patientIdentifier.citizenId) {
@@ -1195,7 +1195,7 @@ except Exception as e:
       const patientConds: string[] = [];
       if (patientIdentifier.patientName) {
         patientConds.push(
-          `LOWER(p.FullName) LIKE LOWER('%${patientIdentifier.patientName.replace(/'/g, "''")}%')`,
+          `lowerUTF8(p.FullName) LIKE lowerUTF8('%${patientIdentifier.patientName.replace(/'/g, "''")}%')`,
         );
       }
       if (patientIdentifier.citizenId) {
