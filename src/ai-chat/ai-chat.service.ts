@@ -340,7 +340,7 @@ export class AiChatService {
             pythonCode: z
               .string()
               .describe(
-                `Python code có download OpenCRAVAT excel url ${excelFilePath} và phân tích Gene sheet, bỏ qua 2 row đầu, xác định top 3 biến thể xuất hiện nhiều nhất: Cột A là tên biến thể, Cột C là số lượng`,
+                `Python code có download OpenCRAVAT excel url ${excelFilePath} và phân tích Gene sheet, bỏ qua 2 row đầu, xác định top 3 biến thể xuất hiện nhiều nhất: Cột A là tên biến thể, Cột C là số lượng. Bắt buộc in ra 1 dòng theo format: TOP_VARIANTS_JSON: ["variant1", "variant2", "variant3"]`,
               ),
             retryCount: z
               .number()
@@ -361,28 +361,39 @@ export class AiChatService {
           description: `BƯỚC 3: Chuẩn bị search queries cho top 3 biến thể xuất hiện nhiều nhất.
           
           Dựa vào kết quả từ bước 2:
-          - Tạo search queries cho top 3 biến thể
-          - Focus vào clinical significance, disease associations
-          - Generate queries phù hợp cho web search
+          - Nhận mảng tên 3 biến thể phổ biến nhất
+          - Tạo search queries từ template cố định, tập trung clinical significance và disease associations
+          - Không thực thi Python ở bước này
           
           Input: Top 3 variants list từ bước 2`,
           inputSchema: z.object({
-            pythonCode: z
-              .string()
-              .describe(
-                'Python code để chuẩn bị search queries cho top 3 biến thể xuất hiện nhiều nhất',
-              ),
+            variants: z
+              .array(z.string())
+              .min(1)
+              .max(3)
+              .describe('Danh sách 1-3 biến thể phổ biến nhất lấy từ bước 2'),
             retryCount: z
               .number()
               .optional()
               .default(0)
               .describe('Số lần retry nếu có lỗi'),
           }),
-          execute: async ({ pythonCode, retryCount = 0 }) => {
+          execute: async ({ variants }) => {
             this.logger.log(
-              `Preparing variant search with LLM code, retry: ${retryCount}`,
+              `Preparing fixed-template search queries for variants`,
             );
-            return await this.executeVariantSearchStep(pythonCode, retryCount);
+            const queries = this.generateVariantSearchQueries(variants);
+            return {
+              success: true,
+              stepName: 'variant_search',
+              nextStep: null,
+              message:
+                '✅ Đã chuẩn bị xong search queries cho top biến thể. Bây giờ thực hiện web search.',
+              searchReady: true,
+              queries,
+              instruction:
+                'Sử dụng web_search_preview để tìm kiếm thông tin về các biến thể với truy vấn đã tạo.',
+            };
           },
         }),
 
@@ -538,10 +549,17 @@ except Exception as e:
       const result = await this.daytonaService.executePythonCode(pythonCode);
 
       if (result.exitCode === 0) {
+        const variants = this.parseTopVariantsFromPythonOutput(result.result);
+        if (!variants || variants.length === 0) {
+          throw new Error(
+            'Không trích xuất được TOP_VARIANTS_JSON từ output Python. Vui lòng in ra dòng: TOP_VARIANTS_JSON: ["variant1", "variant2", "variant3"]',
+          );
+        }
         return {
           success: true,
           stepName: 'gene_analysis',
           result: result.result,
+          variants,
           nextStep: 'variant_search',
           message:
             '✅ Đã phân tích Gene sheet và xác định top 3 biến thể xuất hiện nhiều nhất. Tiếp theo: chuẩn bị search queries.',
@@ -1391,5 +1409,36 @@ except Exception as e:
         `"${searchTerm}" mutation disease association`,
       ]
     );
+  }
+
+  private generateVariantSearchQueries(variants: string[]): string[] {
+    const queries: string[] = [];
+    const templates = [
+      '"{v}" ClinVar clinical significance pathogenic likely pathogenic',
+      '"{v}" disease association OMIM PubMed review',
+      '"{v}" gnomAD frequency population database',
+    ];
+    for (const v of variants) {
+      for (const t of templates) {
+        queries.push(t.replace('{v}', v));
+      }
+    }
+    return queries;
+  }
+
+  private parseTopVariantsFromPythonOutput(output: string): string[] {
+    try {
+      // Look for a line starting with TOP_VARIANTS_JSON:
+      const markerRegex = /TOP_VARIANTS_JSON\s*:\s*(\[.*\])/s;
+      const m = markerRegex.exec(output);
+      if (m && m[1]) {
+        const jsonText = m[1].trim();
+        const arr = JSON.parse(jsonText);
+        if (Array.isArray(arr)) {
+          return arr.filter((x) => typeof x === 'string').slice(0, 3);
+        }
+      }
+    } catch (_) {}
+    return [];
   }
 }

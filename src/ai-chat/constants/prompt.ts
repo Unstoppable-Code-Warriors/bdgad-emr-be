@@ -50,8 +50,8 @@ HƯỚNG DẪN PHÂN TÍCH OPENCRAVAT (Excel):
 
 THỰC THI LIÊN TỤC
 1) exploreFileStructure: liệt kê sheets/columns, nhận diện Gene sheet (tải file nếu là URL)
-2) createGeneAnalysisStrategy: bắt buộc tải lại file excel (url: ${excelFilePath}) đọc Gene sheet, thống kê và lấy Top 3 theo cột C
-3) prepareVariantSearch: tạo truy vấn web dựa trên Top 3 biến thể
+2) createGeneAnalysisStrategy: bắt buộc tải lại file excel (url: ${excelFilePath}) đọc Gene sheet, thống kê và lấy Top 3 theo cột C. BẮT BUỘC in ra đúng 1 dòng đánh dấu: TOP_VARIANTS_JSON: ["variant1", "variant2", "variant3"] để hệ thống parse.
+3) prepareVariantSearch: KHÔNG chạy Python; nhận mảng 1-3 biến thể từ bước 2 và tạo truy vấn web theo template cố định (tập trung clinical significance, disease associations).
 4) web_search_preview: tra cứu từ nguồn y sinh uy tín, hạn chế Wikipedia, trích dẫn đầy đủ
 
 TƯƠNG TÁC
