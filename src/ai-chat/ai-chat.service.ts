@@ -148,6 +148,58 @@ export class AiChatService {
           },
         }),
 
+        // Tool để lấy hồ sơ sức khỏe chi tiết của bệnh nhân
+        getPatientHealthRecords: tool({
+          description: `Lấy thông tin chi tiết hồ sơ sức khỏe và lịch sử khám của bệnh nhân.
+          
+          Sử dụng tool này khi:
+          - Bác sĩ muốn xem chi tiết hồ sơ sức khỏe của bệnh nhân
+          - Cần xem lịch sử khám, kết quả xét nghiệm, file y tế
+          - Xem thông tin từ EHR_url (hồ sơ y tế điện tử)
+          
+          THÔNG TIN CÓ SẴN:
+          - Thông tin cơ bản bệnh nhân (tên, ngày sinh, giới tính, CMND)
+          - Lịch sử khám: ngày khám, loại xét nghiệm, kết quả
+          - Hồ sơ y tế chi tiết từ EHR_url (JSON format)
+          - File y tế: hình ảnh, báo cáo, kết quả xét nghiệm
+          - Thông tin validation và comment từ bác sĩ
+          
+          WORKFLOW:
+          - Bước 1: Tìm bệnh nhân theo tên hoặc CMND
+          - Bước 2: Lấy chi tiết hồ sơ sức khỏe và lịch sử khám
+          
+          QUAN TRỌNG:
+          - Tool này tự động áp dụng bảo mật theo DoctorId
+          - Chỉ trả về thông tin bệnh nhân thuộc quyền quản lý của bác sĩ hiện tại
+          - EHR_url chứa thông tin chi tiết nhất về hồ sơ y tế`,
+          inputSchema: z.object({
+            patientIdentifier: z.object({
+              patientName: z
+                .string()
+                .optional()
+                .describe('Tên bệnh nhân cần xem hồ sơ (ưu tiên)'),
+              citizenId: z
+                .string()
+                .optional()
+                .describe('CMND/CCCD của bệnh nhân (nếu không có tên)'),
+            }),
+            includeHistory: z
+              .boolean()
+              .optional()
+              .default(true)
+              .describe('Có bao gồm lịch sử khám chi tiết không'),
+            purpose: z.string().describe('Mục đích xem hồ sơ (để logging)'),
+          }),
+          execute: async ({ patientIdentifier, includeHistory, purpose }) => {
+            return await this.executeGetPatientHealthRecords(
+              patientIdentifier,
+              includeHistory,
+              purpose,
+              user.id,
+            );
+          },
+        }),
+
         // Tool để thực hiện các truy vấn thống kê và phân tích chung
         commonQuery: tool({
           description: `Thực hiện các truy vấn thống kê, phân tích dữ liệu EMR và xem chi tiết bệnh nhân bằng ClickHouse SQL.
@@ -700,7 +752,7 @@ except Exception as e:
           ? `HAVING ${havingConditions.join(' AND ')}`
           : '';
 
-      // Build the optimized query
+      // Build the optimized query - FIXED: Use INNER JOIN to get only patients with tests
       const query = `
         SELECT 
           p.PatientKey,
@@ -713,7 +765,8 @@ except Exception as e:
           MIN(f.DateReceived) as FirstVisitDate,
           MAX(f.DateReceived) as LastVisitDate
         FROM default.DimPatient p
-        LEFT JOIN default.FactGeneticTestResult f ON p.PatientKey = f.PatientKey
+        INNER JOIN default.FactGeneticTestResult f ON p.PatientKey = f.PatientKey
+        INNER JOIN default.DimProvider dp ON f.ProviderKey = dp.ProviderKey
         WHERE ${whereClause}
         GROUP BY p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, p.citizenID, p.Address
         ${havingClause}
@@ -744,6 +797,149 @@ except Exception as e:
         error: error.message,
         message: `Có lỗi xảy ra khi tìm kiếm bệnh nhân. Vui lòng thử lại.`,
         suggestion: 'Hãy kiểm tra lại tiêu chí tìm kiếm',
+      };
+    }
+  }
+
+  private async executeGetPatientHealthRecords(
+    patientIdentifier: {
+      patientName?: string;
+      citizenId?: string;
+    },
+    includeHistory: boolean,
+    purpose: string,
+    doctorId: number,
+  ) {
+    try {
+      this.logger.log(
+        `Getting patient health records by doctor ${doctorId}: ${purpose}`,
+      );
+
+      // Validate input
+      if (!patientIdentifier.patientName && !patientIdentifier.citizenId) {
+        throw new Error('Cần cung cấp tên bệnh nhân hoặc CMND để tìm kiếm');
+      }
+
+      // Build WHERE conditions for patient identification
+      const patientConditions: string[] = [];
+      if (patientIdentifier.patientName) {
+        patientConditions.push(
+          `LOWER(p.FullName) LIKE LOWER('%${patientIdentifier.patientName.replace(/'/g, "''")}%')`,
+        );
+      }
+      if (patientIdentifier.citizenId) {
+        patientConditions.push(
+          `p.citizenID = '${patientIdentifier.citizenId.replace(/'/g, "''")}'`,
+        );
+      }
+
+      // Build the query to get patient health records
+      const query = `
+        SELECT 
+          p.PatientKey,
+          p.FullName,
+          p.DateOfBirth,
+          p.Gender,
+          p.citizenID,
+          p.Address,
+          f.DateReceived as VisitDate,
+          f.Location as VisitLocation,
+          dt.TestRunKey,
+          dt.CaseID,
+          dt.EHR_url,
+          dt.result_etl_url,
+          dt.htmlResult,
+          dt.excelResult,
+          dt.commentResult,
+          t.TestName,
+          t.TestCategory,
+          d.DiagnosisDescription
+        FROM default.DimPatient p
+        INNER JOIN default.FactGeneticTestResult f ON p.PatientKey = f.PatientKey
+        INNER JOIN default.DimProvider dp ON f.ProviderKey = dp.ProviderKey
+        LEFT JOIN default.DimTestRun dt ON f.TestRunKey = dt.TestRunKey
+        LEFT JOIN default.DimTest t ON f.TestKey = t.TestKey
+        LEFT JOIN default.DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+        WHERE (${patientConditions.join(' OR ')})
+          AND dp.DoctorId = ${doctorId}
+        ORDER BY f.DateReceived DESC
+      `;
+
+      // Execute the query
+      const result = await this.clickHouseService.query(query);
+      const records = result.data || [];
+
+      if (records.length === 0) {
+        return {
+          success: false,
+          purpose,
+          doctorId,
+          patientIdentifier,
+          message:
+            'Không tìm thấy bệnh nhân hoặc bệnh nhân không thuộc quyền quản lý của bạn.',
+          suggestion: 'Hãy kiểm tra lại tên bệnh nhân hoặc CMND',
+        };
+      }
+
+      // Process EHR_url data if available
+      const processedRecords = records.map((record: any) => {
+        let ehrData: any = null;
+        if (record.EHR_url) {
+          try {
+            ehrData = JSON.parse(record.EHR_url);
+          } catch (e) {
+            ehrData = { raw: record.EHR_url };
+          }
+        }
+
+        return {
+          ...record,
+          ehrData,
+          // Extract key information from EHR data
+          labCode: ehrData?.[0]?.labcode || null,
+          testType: ehrData?.[0]?.type || null,
+          fileUrl: ehrData?.[0]?.file_url || null,
+          excelResult: ehrData?.[0]?.excelResult || record.excelResult,
+          htmlResult: ehrData?.[0]?.htmlResult || record.htmlResult,
+          validationComment:
+            ehrData?.[0]?.validationInfo?.commentResult || record.commentResult,
+        };
+      });
+
+      // Group by patient if multiple records
+      const patientSummary = {
+        patientKey: records[0].PatientKey,
+        fullName: records[0].FullName,
+        dateOfBirth: records[0].DateOfBirth,
+        gender: records[0].Gender,
+        citizenId: records[0].citizenID,
+        address: records[0].Address,
+        totalVisits: records.length,
+        firstVisit: records[records.length - 1]?.DateReceived,
+        lastVisit: records[0]?.DateReceived,
+      };
+
+      return {
+        success: true,
+        purpose,
+        doctorId,
+        patientIdentifier,
+        patientSummary,
+        healthRecords: includeHistory ? processedRecords : [],
+        totalRecords: records.length,
+        message: `Đã tìm thấy ${records.length} lần khám của bệnh nhân ${patientSummary.fullName}.`,
+        note: 'Thông tin chi tiết hồ sơ y tế được lưu trong EHR_url (JSON format).',
+      };
+    } catch (error) {
+      this.logger.error(`Get patient health records error: ${error.message}`);
+      return {
+        success: false,
+        purpose,
+        doctorId,
+        patientIdentifier,
+        error: error.message,
+        message: `Có lỗi xảy ra khi lấy hồ sơ sức khỏe bệnh nhân. Vui lòng thử lại.`,
+        suggestion: 'Hãy kiểm tra lại thông tin bệnh nhân',
       };
     }
   }
