@@ -31,9 +31,13 @@ export class DaytonaService implements OnModuleInit, OnModuleDestroy {
         disk: 4, // 4GB disk space
       },
     });
-    this.sandbox.process.executeCommand('pip install pandas');
-    this.sandbox.process.executeCommand('pip install requests');
-    this.sandbox.process.executeCommand('pip install openpyxl');
+
+    // Proactively install required Python libraries for Excel analysis/web requests
+    this.logger.log('Installing Python dependencies in Daytona sandbox...');
+    await this.sandbox.process.executeCommand(
+      'pip install --no-input --disable-pip-version-check pandas numpy openpyxl xlrd requests',
+    );
+    this.logger.log('Python dependencies installed.');
   }
 
   async onModuleDestroy() {

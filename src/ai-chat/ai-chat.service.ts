@@ -438,14 +438,32 @@ export class AiChatService {
 # BƯỚC 1: KHÁM PHÁ CẤU TRÚC FILE EXCEL
 import pandas as pd
 import numpy as np
+import os
+import tempfile
+from urllib.parse import urlparse
+from urllib.request import urlretrieve
 
 excel_file_path = "${excelFilePath || ''}"
 print("🔍 BƯỚC 1: KHÁM PHÁ CẤU TRÚC FILE OPENCRAVAT")
 print("📂 File: {}".format(excel_file_path))
 
 try:
+    # Chuẩn hóa đường dẫn: nếu là URL, tải về file tạm trước khi đọc
+    local_path = excel_file_path
+    try:
+        parsed = urlparse(excel_file_path)
+        if parsed.scheme in ("http", "https"):
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
+            os.close(tmp_fd)
+            print("⬇️  Đang tải file từ URL về tạm thời...")
+            urlretrieve(excel_file_path, tmp_path)
+            local_path = tmp_path
+            print("✅ Tải xong: {}".format(local_path))
+    except Exception as url_err:
+        print("⚠️  Không thể tải file từ URL, sẽ cố đọc trực tiếp bằng pandas: {}".format(str(url_err)))
+
     # Load all sheets
-    excel_data = pd.read_excel(excel_file_path, sheet_name=None)
+    excel_data = pd.read_excel(local_path, sheet_name=None)
     print("✅ File loaded successfully!")
     print("📋 Sheets found: {}".format(list(excel_data.keys())))
     
