@@ -859,20 +859,61 @@ except Exception as e:
         throw new Error('Cần cung cấp tên bệnh nhân hoặc CMND để tìm kiếm');
       }
 
-      // Build WHERE conditions for patient identification
-      const patientConditions: string[] = [];
+      // Step 0: Resolve patient(s) first to get PatientKey and handle disambiguation
+      const idConds: string[] = [];
       if (patientIdentifier.patientName) {
-        patientConditions.push(
+        idConds.push(
           `LOWER(p.FullName) LIKE LOWER('%${patientIdentifier.patientName.replace(/'/g, "''")}%')`,
         );
       }
       if (patientIdentifier.citizenId) {
-        patientConditions.push(
+        idConds.push(
           `p.citizenID = '${patientIdentifier.citizenId.replace(/'/g, "''")}'`,
         );
       }
 
-      // Determine optional Location filter by recordType
+      const patientLookupQuery = `
+        SELECT p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, p.citizenID
+        FROM default.DimPatient p
+        WHERE ${idConds.join(' OR ')}
+        LIMIT 5
+      `;
+      const lookup = await this.clickHouseService.query(patientLookupQuery);
+      const candidates: any[] = lookup.data || [];
+
+      if (candidates.length === 0) {
+        return {
+          success: false,
+          purpose,
+          doctorId,
+          patientIdentifier,
+          message: 'Không tìm thấy bệnh nhân phù hợp.',
+          needDisambiguation: false,
+        };
+      }
+
+      if (candidates.length > 1 && !patientIdentifier.citizenId) {
+        return {
+          success: false,
+          purpose,
+          doctorId,
+          patientIdentifier,
+          message:
+            'Có nhiều bệnh nhân trùng tên. Vui lòng cung cấp CMND hoặc chi tiết hơn.',
+          needDisambiguation: true,
+          candidates: candidates.map((p) => ({
+            patientKey: p.PatientKey,
+            fullName: p.FullName,
+            dateOfBirth: p.DateOfBirth,
+            gender: p.Gender,
+            citizenId: p.citizenID,
+          })),
+        };
+      }
+
+      const patientKey = candidates[0].PatientKey;
+
+      // Determine optional Location filter by recordType (normalized)
       const locationByType: Record<string, string> = {
         exam: 'bdgad',
         medical: 'pharmacy',
@@ -881,8 +922,11 @@ except Exception as e:
       const targetLocation = recordType
         ? locationByType[recordType]
         : undefined;
+      const locationFilter = targetLocation
+        ? "AND lower(trim(BOTH ' ' FROM f.Location)) = '" + targetLocation + "'"
+        : '';
 
-      // Build the query to get patient health records
+      // Build the query to get patient health records (use PatientKey and doctor restriction)
       const query = `
         SELECT 
           p.PatientKey,
@@ -891,7 +935,7 @@ except Exception as e:
           p.Gender,
           p.citizenID,
           p.Address,
-          f.DateReceived as VisitDate,
+          f.DateReceived as DateReceived,
           f.Location as VisitLocation,
           dt.TestRunKey,
           dt.CaseID,
@@ -909,9 +953,9 @@ except Exception as e:
         LEFT JOIN default.DimTestRun dt ON f.TestRunKey = dt.TestRunKey
         LEFT JOIN default.DimTest t ON f.TestKey = t.TestKey
         LEFT JOIN default.DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
-        WHERE (${patientConditions.join(' OR ')})
+        WHERE p.PatientKey = ${patientKey}
           AND dp.DoctorId = ${doctorId}
-          ${targetLocation ? `AND f.Location = '${targetLocation}'` : ''}
+          ${locationFilter}
         ORDER BY f.DateReceived DESC
       `;
 
@@ -926,8 +970,8 @@ except Exception as e:
           doctorId,
           patientIdentifier,
           message:
-            'Không tìm thấy bệnh nhân hoặc bệnh nhân không thuộc quyền quản lý của bạn.',
-          suggestion: 'Hãy kiểm tra lại tên bệnh nhân hoặc CMND',
+            'Không tìm thấy hồ sơ phù hợp theo bộ lọc đã chọn hoặc bệnh nhân không thuộc quyền quản lý của bạn.',
+          suggestion: 'Hãy kiểm tra lại bộ lọc hoặc thông tin bệnh nhân',
         };
       }
 
@@ -955,7 +999,7 @@ except Exception as e:
           Address: record.Address,
 
           // Visit info
-          VisitDate: record.VisitDate,
+          VisitDate: record.DateReceived,
           VisitLocation: record.VisitLocation,
           TestName: record.TestName,
           TestCategory: record.TestCategory,
@@ -976,7 +1020,7 @@ except Exception as e:
         };
       });
 
-      // Group by patient if multiple records
+      // Patient summary
       const patientSummary = {
         patientKey: records[0].PatientKey,
         fullName: records[0].FullName,
