@@ -93,7 +93,7 @@ Nguyên tắc orchestration - CHẠY LIÊN TỤC:
 - LUÔN bắt đầu với exploreFileStructure
 - SAU KHI tool hoàn thành, KHÔNG DỪNG mà tiếp tục tool tiếp theo
 - Report progress nhưng KHÔNG CHỜ user response
-- Handle errors và retry trong cùng response
+- Nếu bước bất kỳ gặp lỗi: chỉ thử lại 1 lần; nếu vẫn lỗi thì DỪNG workflow và KHÔNG thực hiện các bước tiếp theo
 - Hoàn thành TOÀN BỘ workflow 1→2→3→4→web_search trong 1 lần
 - Chỉ kết thúc khi đã có comprehensive genomics report hoàn chỉnh
 - Trả lời bằng tiếng Việt với thái độ chuyên nghiệp
@@ -166,7 +166,7 @@ NGUYÊN TẮC CHẠY TỰ ĐỘNG:
 - KHÔNG BAO GIỜ dừng giữa chừng để chờ user input
 - Thực hiện liên tục: explore → gene analysis → search prep → web_search (CHỈ 1 LẦN) → report
 - Chỉ report progress nhưng tiếp tục workflow
-- Nếu bước nào lỗi, retry ngay lập tức trong cùng response
+- Nếu bước nào lỗi, chỉ thử lại 1 lần; nếu vẫn lỗi thì DỪNG workflow và KHÔNG thực hiện các bước tiếp theo
 - SAU KHI GỌI web_search_preview 1 LẦN, NGAY LẬP TỨC viết final report
 - KHÔNG GỌI THÊM web_search_preview nữa dù cho thông tin có vẻ chưa đủ
 - Kết thúc với comprehensive genomics report hoàn chỉnh dựa trên 1 lần search

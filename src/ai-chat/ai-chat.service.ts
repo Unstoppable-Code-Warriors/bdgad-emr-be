@@ -441,29 +441,29 @@ import numpy as np
 
 excel_file_path = "${excelFilePath || ''}"
 print("🔍 BƯỚC 1: KHÁM PHÁ CẤU TRÚC FILE OPENCRAVAT")
-print(f"📂 File: {excel_file_path}")
+print("📂 File: {}".format(excel_file_path))
 
 try:
     # Load all sheets
     excel_data = pd.read_excel(excel_file_path, sheet_name=None)
-    print(f"✅ File loaded successfully!")
-    print(f"📋 Sheets found: {list(excel_data.keys())}")
+    print("✅ File loaded successfully!")
+    print("📋 Sheets found: {}".format(list(excel_data.keys())))
     
     structure_info = {}
     
     for sheet_name, sheet_data in excel_data.items():
-        print(f"\n📊 Sheet '{sheet_name}':")
-        print(f"  - Rows: {len(sheet_data)}")
-        print(f"  - Columns: {len(sheet_data.columns)}")
+        print("\n📊 Sheet '{}':".format(sheet_name))
+        print("  - Rows: {}".format(len(sheet_data)))
+        print("  - Columns: {}".format(len(sheet_data.columns)))
         
         if len(sheet_data) > 0:
             # Show first few column names
-            print(f"  - Column samples: {list(sheet_data.columns[:5])}")
+            print("  - Column samples: {}".format(list(sheet_data.columns[:5])))
             
             # Identify key columns
             key_cols = []
             for col in sheet_data.columns:
-                col_lower = col.lower()
+                col_lower = str(col).lower()
                 if any(keyword in col_lower for keyword in [
                     'gene', 'chrom', 'position', 'clinvar', 'cosmic',
                     'significance', 'ontology', 'consequence', 'zygosity',
@@ -472,23 +472,23 @@ try:
                     key_cols.append(col)
             
             if key_cols:
-                print(f"  - Key columns: {key_cols}")
+                print("  - Key columns: {}".format(key_cols))
             
             structure_info[sheet_name] = {
-                'rows': len(sheet_data),
-                'columns': list(sheet_data.columns),
-                'key_columns': key_cols
+                'rows': int(len(sheet_data)),
+                'columns': list(map(str, sheet_data.columns)),
+                'key_columns': list(map(str, key_cols))
             }
     
-    print(f"\n✅ EXPLORATION COMPLETED")
-    print(f"Structure info saved for strategy planning.")
+    print("\n✅ EXPLORATION COMPLETED")
+    print("Structure info saved for strategy planning.")
     
     # Save structure info for next steps
     import json
     globals()['file_structure'] = structure_info
     
 except Exception as e:
-    print(f"❌ Error exploring file: {str(e)}")
+    print("❌ Error exploring file: {}".format(str(e)))
     raise
 `;
 
