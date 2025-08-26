@@ -13,7 +13,6 @@ import * as path from 'path';
 export class MockEtlService {
   private readonly logger = new Logger(MockEtlService.name);
   private vcfPath: string;
-  private tumorVcfPath: string;
 
   constructor(
     @Inject('ETL_SERVICE') private readonly etlClient: ClientProxy,
@@ -22,24 +21,41 @@ export class MockEtlService {
     private readonly s3Service: S3Service,
   ) {
     this.vcfPath = this.configService.get<string>('VCF_PATH') || '';
-    this.tumorVcfPath = this.configService.get<string>('TUMOR_VCF_PATH') || '';
   }
 
   async startAnalyze(body: MockEtlReqDto) {
     this.logger.log('startAnalyze', body);
     let tempFilePath: string | null = null;
-    const { tumor = true } = body;
-    const analysisVcfPath = tumor ? this.tumorVcfPath : this.vcfPath;
 
     try {
       // 1. Download VCF file from S3 to local temp folder
+      // If VCF_PATH is a prefix (e.g., s3://etl-results), list objects and pick a random .vcf/.vcf.gz
+      let selectedS3Url = this.vcfPath;
+      if (
+        this.vcfPath.startsWith('s3://') &&
+        (this.vcfPath.split('/').length <= 4 || this.vcfPath.endsWith('/'))
+      ) {
+        const allUrls = await this.s3Service.listObjectUrlsByPrefix(
+          this.vcfPath,
+        );
+        const vcfUrls = allUrls.filter(
+          (u) => u.endsWith('.vcf') || u.endsWith('.vcf.gz'),
+        );
+        if (vcfUrls.length === 0) {
+          throw new Error(`No VCF files found under prefix: ${this.vcfPath}`);
+        }
+        const randomIndex = Math.floor(Math.random() * vcfUrls.length);
+        selectedS3Url = vcfUrls[randomIndex];
+        this.logger.log(`Selected random VCF: ${selectedS3Url}`);
+      }
+
       this.logger.log(
-        `Starting analysis for ${body.analysis_id}, downloading VCF from: ${analysisVcfPath}`,
+        `Starting analysis for ${body.analysis_id}, downloading VCF from: ${selectedS3Url}`,
       );
 
       const tempDir = path.join(process.cwd(), 'temp');
       const downloadResult = await this.s3Service.downloadFileToLocal(
-        analysisVcfPath,
+        selectedS3Url,
         tempDir,
         `${body.analysis_id}_${body.patient_id}_${body.sample_name}_${Date.now()}.vcf.gz`,
       );

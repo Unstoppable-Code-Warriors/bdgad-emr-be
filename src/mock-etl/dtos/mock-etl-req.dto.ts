@@ -52,8 +52,4 @@ export class MockEtlReqDto {
   @IsString()
   @IsNotEmpty()
   email: string;
-
-  @IsBoolean()
-  @IsOptional()
-  tumor?: boolean;
 }

@@ -1,6 +1,11 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  GetObjectCommand,
+  ListObjectsV2Command,
+  ListObjectsV2CommandOutput,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -40,6 +45,18 @@ export class S3Service {
    */
   private parseS3Url(s3Url: string): { bucket: string; key: string } {
     try {
+      // Support s3://bucket/key style
+      if (s3Url.startsWith('s3://')) {
+        const withoutScheme = s3Url.substring('s3://'.length);
+        const firstSlash = withoutScheme.indexOf('/');
+        if (firstSlash === -1) {
+          return { bucket: withoutScheme, key: '' };
+        }
+        const bucket = withoutScheme.substring(0, firstSlash);
+        const key = withoutScheme.substring(firstSlash + 1);
+        return { bucket, key };
+      }
+
       const url = new URL(s3Url);
 
       // Check if it's a Cloudflare R2 URL pattern
@@ -137,8 +154,8 @@ export class S3Service {
       return true;
     } catch (error) {
       if (
-        error.name === 'NoSuchKey' ||
-        error.$metadata?.httpStatusCode === 404
+        (error as any).name === 'NoSuchKey' ||
+        (error as any).$metadata?.httpStatusCode === 404
       ) {
         return false;
       }
@@ -192,13 +209,13 @@ export class S3Service {
 
       const response = await this.s3Client.send(command);
 
-      if (!response.Body) {
+      if (!(response as any).Body) {
         throw new Error('No file content received from S3');
       }
 
       // Convert the readable stream to buffer
       const chunks: Uint8Array[] = [];
-      const reader = response.Body.transformToWebStream().getReader();
+      const reader = (response as any).Body.transformToWebStream().getReader();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -223,6 +240,41 @@ export class S3Service {
       throw new BadRequestException(
         `Failed to download file: ${error.message}`,
       );
+    }
+  }
+
+  /**
+   * List object URLs under a given s3://bucket/prefix
+   */
+  async listObjectUrlsByPrefix(s3Prefix: string): Promise<string[]> {
+    try {
+      const { bucket, key } = this.parseS3Url(s3Prefix);
+      const urls: string[] = [];
+
+      let continuationToken: string | undefined = undefined;
+
+      do {
+        const command = new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: key || undefined,
+          ContinuationToken: continuationToken,
+        });
+        const resp: ListObjectsV2CommandOutput =
+          await this.s3Client.send(command);
+        (resp.Contents || []).forEach((obj) => {
+          if (obj.Key) {
+            urls.push(`s3://${bucket}/${obj.Key}`);
+          }
+        });
+        continuationToken = resp.IsTruncated
+          ? resp.NextContinuationToken
+          : undefined;
+      } while (continuationToken);
+
+      return urls;
+    } catch (error) {
+      this.logger.error('Failed to list objects by prefix:', error);
+      throw new BadRequestException(`Failed to list objects: ${error.message}`);
     }
   }
 }
