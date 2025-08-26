@@ -179,8 +179,8 @@ export class AiChatService {
           - Thông tin validation và comment từ bác sĩ
           
           WORKFLOW:
-          - Bước 1: Tìm bệnh nhân theo tên hoặc CMND (nếu trùng tên: yêu cầu làm rõ)
-          - Bước 2: Lấy chi tiết hồ sơ sức khỏe và lịch sử khám
+          - Bước 1: Gọi searchPatients để lấy danh sách và chọn bệnh nhân (lấy PatientKey)
+          - Bước 2: Gọi tool này với PatientKey để lấy chi tiết hồ sơ
           - Có thể lọc theo loại thông tin bằng Location: xét nghiệm=bdgad, hồ sơ=pharmacy, thẩm định=test-result
           
           QUAN TRỌNG:
@@ -190,16 +190,11 @@ export class AiChatService {
           - KHÔNG trả về link S3, file path, hoặc URL nội bộ
           - Chỉ trả về thông tin y tế cần thiết cho bác sĩ`,
           inputSchema: z.object({
-            patientIdentifier: z.object({
-              patientName: z
-                .string()
-                .optional()
-                .describe('Tên bệnh nhân cần xem hồ sơ (ưu tiên)'),
-              citizenId: z
-                .string()
-                .optional()
-                .describe('CMND/CCCD của bệnh nhân (nếu không có tên)'),
-            }),
+            patientKey: z
+              .number()
+              .describe(
+                'PatientKey của bệnh nhân (lấy từ kết quả searchPatients)',
+              ),
             recordType: z
               .enum(['exam', 'medical', 'validation'])
               .optional()
@@ -219,14 +214,14 @@ export class AiChatService {
             purpose: z.string().describe('Mục đích xem hồ sơ (để logging)'),
           }),
           execute: async ({
-            patientIdentifier,
+            patientKey,
             recordType,
             countOnly,
             includeHistory,
             purpose,
           }) => {
             return await this.executeGetPatientHealthRecords(
-              patientIdentifier,
+              patientKey,
               includeHistory,
               recordType,
               countOnly ?? false,
@@ -858,10 +853,7 @@ except Exception as e:
   }
 
   private async executeGetPatientHealthRecords(
-    patientIdentifier: {
-      patientName?: string;
-      citizenId?: string;
-    },
+    patientKey: number,
     includeHistory: boolean,
     recordType: 'exam' | 'medical' | 'validation' | undefined,
     countOnly: boolean,
@@ -873,64 +865,7 @@ except Exception as e:
         `Getting patient health records by doctor ${doctorId}: ${purpose}`,
       );
 
-      // Validate input
-      if (!patientIdentifier.patientName && !patientIdentifier.citizenId) {
-        throw new Error('Cần cung cấp tên bệnh nhân hoặc CMND để tìm kiếm');
-      }
-
-      // Step 0: Resolve patient(s) first to get PatientKey and handle disambiguation
-      const idConds: string[] = [];
-      if (patientIdentifier.patientName) {
-        idConds.push(
-          `lowerUTF8(p.FullName) LIKE lowerUTF8('%${patientIdentifier.patientName.replace(/'/g, "''")}%')`,
-        );
-      }
-      if (patientIdentifier.citizenId) {
-        idConds.push(
-          `p.citizenID = '${patientIdentifier.citizenId.replace(/'/g, "''")}'`,
-        );
-      }
-
-      const patientLookupQuery = `
-        SELECT p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, p.citizenID
-        FROM default.DimPatient p
-        WHERE ${idConds.join(' OR ')}
-        LIMIT 5
-      `;
-      const lookup = await this.clickHouseService.query(patientLookupQuery);
-      const candidates: any[] = lookup.data || [];
-
-      if (candidates.length === 0) {
-        return {
-          success: false,
-          purpose,
-          doctorId,
-          patientIdentifier,
-          message: 'Không tìm thấy bệnh nhân phù hợp.',
-          needDisambiguation: false,
-        };
-      }
-
-      if (candidates.length > 1 && !patientIdentifier.citizenId) {
-        return {
-          success: false,
-          purpose,
-          doctorId,
-          patientIdentifier,
-          message:
-            'Có nhiều bệnh nhân trùng tên. Vui lòng cung cấp CMND hoặc chi tiết hơn.',
-          needDisambiguation: true,
-          candidates: candidates.map((p) => ({
-            patientKey: p.PatientKey,
-            fullName: p.FullName,
-            dateOfBirth: p.DateOfBirth,
-            gender: p.Gender,
-            citizenId: p.citizenID,
-          })),
-        };
-      }
-
-      const patientKey = candidates[0].PatientKey;
+      // Input already has patientKey resolved from searchPatients
 
       // Authorize: doctor can see full history if they have at least 1 record with this patient
       const authQuery = `
@@ -950,7 +885,7 @@ except Exception as e:
           success: false,
           purpose,
           doctorId,
-          patientIdentifier,
+          patientKey,
           message:
             'Bạn chưa từng phụ trách bệnh nhân này nên không có quyền xem lịch sử đầy đủ.',
           suggestion:
@@ -980,18 +915,18 @@ except Exception as e:
           p.Gender,
           p.citizenID,
           p.Address,
-          f.DateReceived as DateReceived,
-          f.Location as VisitLocation,
-          dt.TestRunKey,
-          dt.CaseID,
-          dt.EHR_url,
-          dt.result_etl_url,
-          dt.htmlResult,
-          dt.excelResult,
-          dt.commentResult,
-          t.TestName,
-          t.TestCategory,
-          d.DiagnosisDescription
+          argMax(f.DateReceived, f.DateReceived) as DateReceived,
+          argMax(f.Location, f.DateReceived) as VisitLocation,
+          argMax(dt.TestRunKey, f.DateReceived) as TestRunKey,
+          argMax(dt.CaseID, f.DateReceived) as CaseID,
+          argMax(dt.EHR_url, f.DateReceived) as EHR_url,
+          argMax(dt.result_etl_url, f.DateReceived) as result_etl_url,
+          argMax(dt.htmlResult, f.DateReceived) as htmlResult,
+          argMax(dt.excelResult, f.DateReceived) as excelResult,
+          argMax(dt.commentResult, f.DateReceived) as commentResult,
+          argMax(t.TestName, f.DateReceived) as TestName,
+          argMax(t.TestCategory, f.DateReceived) as TestCategory,
+          argMax(d.DiagnosisDescription, f.DateReceived) as DiagnosisDescription
         FROM default.DimPatient p
         INNER JOIN default.FactGeneticTestResult f ON p.PatientKey = f.PatientKey
         LEFT JOIN default.DimTestRun dt ON f.TestRunKey = dt.TestRunKey
@@ -999,7 +934,10 @@ except Exception as e:
         LEFT JOIN default.DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
         WHERE p.PatientKey = ${patientKey}
           ${locationFilter}
-        ORDER BY f.DateReceived DESC
+        GROUP BY 
+          p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, p.citizenID, p.Address,
+          f.TestRunKey, f.Location
+        ORDER BY DateReceived DESC
       `;
 
       // Execute the query
@@ -1011,7 +949,7 @@ except Exception as e:
           success: false,
           purpose,
           doctorId,
-          patientIdentifier,
+          patientKey,
           message:
             'Không tìm thấy hồ sơ phù hợp theo bộ lọc đã chọn hoặc bệnh nhân không thuộc quyền quản lý của bạn.',
           suggestion: 'Hãy kiểm tra lại bộ lọc hoặc thông tin bệnh nhân',
@@ -1081,7 +1019,7 @@ except Exception as e:
           success: true,
           purpose,
           doctorId,
-          patientIdentifier,
+          patientKey,
           patient: patientSummary,
           recordType,
           location: targetLocation,
@@ -1094,7 +1032,7 @@ except Exception as e:
         success: true,
         purpose,
         doctorId,
-        patientIdentifier,
+        patientKey,
         patientSummary,
         healthRecords: includeHistory ? processedRecords : [],
         totalRecords: records.length,
@@ -1107,7 +1045,7 @@ except Exception as e:
         success: false,
         purpose,
         doctorId,
-        patientIdentifier,
+        patientKey,
         error: error.message,
         message: `Có lỗi xảy ra khi lấy hồ sơ sức khỏe bệnh nhân. Vui lòng thử lại.`,
         suggestion: 'Hãy kiểm tra lại thông tin bệnh nhân',
