@@ -434,6 +434,7 @@ export class AiChatService {
     retryCount: number = 0,
   ) {
     try {
+      const safeExcelPath = JSON.stringify(excelFilePath || '');
       const exploreCode = `
 # BƯỚC 1: KHÁM PHÁ CẤU TRÚC FILE EXCEL
 import pandas as pd
@@ -443,7 +444,7 @@ import tempfile
 from urllib.parse import urlparse
 from urllib.request import urlretrieve
 
-excel_file_path = "${excelFilePath || ''}"
+excel_file_path = ${safeExcelPath}
 print("🔍 BƯỚC 1: KHÁM PHÁ CẤU TRÚC FILE OPENCRAVAT")
 print("📂 File: {}".format(excel_file_path))
 
