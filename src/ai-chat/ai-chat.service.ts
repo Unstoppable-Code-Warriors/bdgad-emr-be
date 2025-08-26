@@ -763,64 +763,58 @@ finally:
     try {
       this.logger.log(`Patient search by doctor ${doctorId}: ${purpose}`);
 
-      // Build WHERE conditions
-      const conditions: string[] = [];
+      // Build WHERE conditions for patient-level filters
+      const patientConds: string[] = [];
 
-      // Replace correlated subquery with joinable authorization later
       if (searchCriteria.name) {
-        conditions.push(
+        patientConds.push(
           `lowerUTF8(p.FullName) LIKE lowerUTF8('%${searchCriteria.name.replace(/'/g, "''")}%')`,
         );
       }
 
       if (searchCriteria.citizenId) {
-        conditions.push(
+        patientConds.push(
           `p.citizenID = '${searchCriteria.citizenId.replace(/'/g, "''")}'`,
         );
       }
 
       if (searchCriteria.gender) {
-        conditions.push(
+        patientConds.push(
           `p.Gender = '${searchCriteria.gender.replace(/'/g, "''")}'`,
         );
       }
 
       // Date of birth conditions
       if (searchCriteria.dateOfBirth) {
-        conditions.push(`p.DateOfBirth = '${searchCriteria.dateOfBirth}'`);
+        patientConds.push(`p.DateOfBirth = '${searchCriteria.dateOfBirth}'`);
       } else {
         if (searchCriteria.fromDob) {
-          conditions.push(`p.DateOfBirth >= '${searchCriteria.fromDob}'`);
+          patientConds.push(`p.DateOfBirth >= '${searchCriteria.fromDob}'`);
         }
         if (searchCriteria.toDob) {
-          conditions.push(`p.DateOfBirth <= '${searchCriteria.toDob}'`);
+          patientConds.push(`p.DateOfBirth <= '${searchCriteria.toDob}'`);
         }
       }
-
-      // Visit date range conditions
-      if (searchCriteria.fromVisitDate || searchCriteria.toVisitDate) {
-        const visitDateConditions: string[] = [];
-        if (searchCriteria.fromVisitDate) {
-          visitDateConditions.push(
-            `f.DateReceived >= '${searchCriteria.fromVisitDate} 00:00:00'`,
-          );
-        }
-        if (searchCriteria.toVisitDate) {
-          visitDateConditions.push(
-            `f.DateReceived <= '${searchCriteria.toVisitDate} 23:59:59'`,
-          );
-        }
-        if (visitDateConditions.length > 0) {
-          conditions.push(`(${visitDateConditions.join(' AND ')})`);
-        }
-      }
-
-      // Only count exam visits in search (Location = 'bdgad')
-      conditions.push(`lower(trim(BOTH ' ' FROM f.Location)) = 'bdgad'`);
 
       const whereClause =
-        conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+        patientConds.length > 0 ? `WHERE ${patientConds.join(' AND ')}` : '';
       const limit = searchCriteria.limit || 20;
+
+      // Build JOIN conditions for visit date range and bdgad location
+      const joinConds: string[] = [];
+      // Only count exam visits in search (Location = 'bdgad')
+      joinConds.push(`lower(trim(BOTH ' ' FROM f.Location)) = 'bdgad'`);
+      if (searchCriteria.fromVisitDate) {
+        joinConds.push(
+          `f.DateReceived >= '${searchCriteria.fromVisitDate} 00:00:00'`,
+        );
+      }
+      if (searchCriteria.toVisitDate) {
+        joinConds.push(
+          `f.DateReceived <= '${searchCriteria.toVisitDate} 23:59:59'`,
+        );
+      }
+      const onClause = joinConds.length ? `AND ${joinConds.join(' AND ')}` : '';
 
       // Build HAVING clause for visit count range (use distinct visits by (TestRunKey, Location))
       const havingConditions: string[] = [];
@@ -839,7 +833,7 @@ finally:
           ? `HAVING ${havingConditions.join(' AND ')}`
           : '';
 
-      // Authorized patients derived table for the doctor
+      // Authorized patients derived table for the doctor (any location qualifies)
       const authorizedPatientsCTE = `
         SELECT DISTINCT f2.PatientKey
         FROM default.FactGeneticTestResult f2
@@ -847,7 +841,7 @@ finally:
         WHERE dp2.DoctorId = ${doctorId}
       `;
 
-      // Build the optimized query - dedupe visits and count all exam visits once authorized
+      // Build the optimized query - include authorized patients even with zero bdgad visits
       const query = `
         WITH authorized_patients AS (
           ${authorizedPatientsCTE}
@@ -863,8 +857,10 @@ finally:
           MIN(f.DateReceived) as FirstVisitDate,
           MAX(f.DateReceived) as LastVisitDate
         FROM default.DimPatient p
-        INNER JOIN default.FactGeneticTestResult f ON p.PatientKey = f.PatientKey
         INNER JOIN authorized_patients ap ON ap.PatientKey = p.PatientKey
+        LEFT JOIN default.FactGeneticTestResult f 
+          ON p.PatientKey = f.PatientKey 
+          ${onClause}
         ${whereClause}
         GROUP BY p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, p.citizenID, p.Address
         ${havingClause}
