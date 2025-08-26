@@ -289,7 +289,7 @@ export class AiChatService {
       messages: [...createSystemMessages(excelFilePath), ...messages],
       temperature: 0.3, // Lower temperature for more consistent medical analysis
       maxOutputTokens: 1500, // Reduced to prevent excessive output
-      stopWhen: stepCountIs(8),
+      stopWhen: stepCountIs(5),
       tools: {
         // Web search tool for medical research - WITH USAGE TRACKING
         web_search_preview: openai.tools.webSearchPreview({
@@ -391,39 +391,6 @@ export class AiChatService {
               queries,
               instruction:
                 'Sử dụng web_search_preview để tìm kiếm thông tin về các biến thể với truy vấn đã tạo.',
-            };
-          },
-        }),
-
-        // Optional: Clinical database lookup tool
-        lookupClinicalDatabase: tool({
-          description: `Tra cứu thông tin từ các database y khoa về variants/genes cụ thể.
-          Sử dụng sau khi đã có kết quả phân tích genomics data.`,
-          inputSchema: z.object({
-            queryType: z.enum(['variant', 'gene', 'phenotype']),
-            searchTerm: z
-              .string()
-              .describe('Variant ID, gene name, hoặc phenotype cần tra cứu'),
-            databases: z
-              .array(z.string())
-              .optional()
-              .describe('Databases cần tra cứu (ClinVar, COSMIC, dbSNP)'),
-          }),
-          execute: async ({ queryType, searchTerm, databases }) => {
-            // This could integrate with APIs like:
-            // - ClinVar API
-            // - COSMIC API
-            // - dbSNP API
-            // For now, return structured guidance for web search
-
-            return {
-              queryType,
-              searchTerm,
-              suggestedWebSearches: this.generateClinicalSearchQueries(
-                queryType,
-                searchTerm,
-              ),
-              databases: databases || ['ClinVar', 'COSMIC', 'dbSNP', 'gnomAD'],
             };
           },
         }),
