@@ -47,7 +47,7 @@ export class AiChatService {
           
           CẤU TRÚC DỮ LIỆU QUAN TRỌNG:
           - DimTestRun: chứa thông tin chi tiết từng lần khám của bệnh nhân
-          - DimTestRun.EHR_url: cột chứa chi tiết hồ sơ y tế theo từng lần khám
+          - DimTestRun.EHR_url: cột chứa chi tiết hồ sơ y tế/thông tin y tế
           - FactGeneticTestResult: dữ liệu các lần khám
           - DimPatient: thông tin cơ bản bệnh nhân
           - DimProvider: thông tin bác sĩ và quyền truy cập`,
