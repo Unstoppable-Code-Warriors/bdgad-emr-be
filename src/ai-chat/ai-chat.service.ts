@@ -289,7 +289,7 @@ export class AiChatService {
       messages: [...createSystemMessages(excelFilePath), ...messages],
       temperature: 0.3, // Lower temperature for more consistent medical analysis
       maxOutputTokens: 1500, // Reduced to prevent excessive output
-      stopWhen: stepCountIs(7), // Reduced from 10 to 6: 4 analysis steps + 1 web search + 1 final report
+      stopWhen: stepCountIs(6), // Reduced from 10 to 6: 4 analysis steps + 1 web search + 1 final report
       tools: {
         // Web search tool for medical research - WITH USAGE TRACKING
         web_search_preview: openai.tools.webSearchPreview({
@@ -710,7 +710,14 @@ except Exception as e:
       // Build WHERE conditions
       const conditions: string[] = [];
 
-      // Authorization will be enforced via EXISTS on patient-level, not filtering all visits by doctor
+      // Authorize patient: doctor has at least 1 managed record for this patient
+      const doctorAuthorization = `EXISTS (
+        SELECT 1
+        FROM default.FactGeneticTestResult f2
+        INNER JOIN default.DimProvider dp2 ON f2.ProviderKey = dp2.ProviderKey
+        WHERE f2.PatientKey = p.PatientKey AND dp2.DoctorId = ${doctorId}
+      )`;
+      conditions.push(doctorAuthorization);
 
       if (searchCriteria.name) {
         conditions.push(
@@ -760,27 +767,19 @@ except Exception as e:
         }
       }
 
-      // Authorization: doctor must have at least one record with the patient
-      const authExists = `EXISTS (
-        SELECT 1
-        FROM default.FactGeneticTestResult f2
-        INNER JOIN default.DimProvider dp2 ON f2.ProviderKey = dp2.ProviderKey
-        WHERE f2.PatientKey = p.PatientKey AND dp2.DoctorId = ${doctorId}
-      )`;
-
-      const whereClause = [authExists, ...conditions].join(' AND ');
+      const whereClause = conditions.join(' AND ');
       const limit = searchCriteria.limit || 20;
 
-      // Build HAVING clause for visit count range
+      // Build HAVING clause for visit count range (use distinct visits by (TestRunKey, Location))
       const havingConditions: string[] = [];
       if (searchCriteria.minVisitCount) {
         havingConditions.push(
-          `countDistinct((f.TestRunKey, f.Location)) >= ${searchCriteria.minVisitCount}`,
+          `countDistinct(f.TestRunKey, f.Location) >= ${searchCriteria.minVisitCount}`,
         );
       }
       if (searchCriteria.maxVisitCount) {
         havingConditions.push(
-          `countDistinct((f.TestRunKey, f.Location)) <= ${searchCriteria.maxVisitCount}`,
+          `countDistinct(f.TestRunKey, f.Location) <= ${searchCriteria.maxVisitCount}`,
         );
       }
       const havingClause =
@@ -788,7 +787,7 @@ except Exception as e:
           ? `HAVING ${havingConditions.join(' AND ')}`
           : '';
 
-      // Build the optimized query - Deduplicate visits by (TestRunKey, Location)
+      // Build the optimized query - dedupe visits and count all visits once authorized
       const query = `
         SELECT 
           p.PatientKey as PatientKey,
@@ -797,7 +796,7 @@ except Exception as e:
           p.Gender as Gender,
           p.citizenID as citizenID,
           p.Address as Address,
-          countDistinct((f.TestRunKey, f.Location)) as VisitCount,
+          countDistinct(f.TestRunKey, f.Location) as VisitCount,
           MIN(f.DateReceived) as FirstVisitDate,
           MAX(f.DateReceived) as LastVisitDate
         FROM default.DimPatient p
