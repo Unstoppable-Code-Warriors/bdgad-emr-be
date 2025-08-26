@@ -710,15 +710,7 @@ except Exception as e:
       // Build WHERE conditions
       const conditions: string[] = [];
 
-      // Authorize patient: doctor has at least 1 managed record for this patient
-      const doctorAuthorization = `EXISTS (
-        SELECT 1
-        FROM default.FactGeneticTestResult f2
-        INNER JOIN default.DimProvider dp2 ON f2.ProviderKey = dp2.ProviderKey
-        WHERE f2.PatientKey = p.PatientKey AND dp2.DoctorId = ${doctorId}
-      )`;
-      conditions.push(doctorAuthorization);
-
+      // Replace correlated subquery with joinable authorization later
       if (searchCriteria.name) {
         conditions.push(
           `lowerUTF8(p.FullName) LIKE lowerUTF8('%${searchCriteria.name.replace(/'/g, "''")}%')`,
@@ -767,7 +759,8 @@ except Exception as e:
         }
       }
 
-      const whereClause = conditions.join(' AND ');
+      const whereClause =
+        conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
       const limit = searchCriteria.limit || 20;
 
       // Build HAVING clause for visit count range (use distinct visits by (TestRunKey, Location))
@@ -787,8 +780,19 @@ except Exception as e:
           ? `HAVING ${havingConditions.join(' AND ')}`
           : '';
 
+      // Authorized patients derived table for the doctor
+      const authorizedPatientsCTE = `
+        SELECT DISTINCT f2.PatientKey
+        FROM default.FactGeneticTestResult f2
+        INNER JOIN default.DimProvider dp2 ON f2.ProviderKey = dp2.ProviderKey
+        WHERE dp2.DoctorId = ${doctorId}
+      `;
+
       // Build the optimized query - dedupe visits and count all visits once authorized
       const query = `
+        WITH authorized_patients AS (
+          ${authorizedPatientsCTE}
+        )
         SELECT 
           p.PatientKey as PatientKey,
           p.FullName as FullName,
@@ -801,7 +805,8 @@ except Exception as e:
           MAX(f.DateReceived) as LastVisitDate
         FROM default.DimPatient p
         INNER JOIN default.FactGeneticTestResult f ON p.PatientKey = f.PatientKey
-        WHERE ${whereClause}
+        INNER JOIN authorized_patients ap ON ap.PatientKey = p.PatientKey
+        ${whereClause}
         GROUP BY p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, p.citizenID, p.Address
         ${havingClause}
         ORDER BY p.FullName
