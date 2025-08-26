@@ -288,8 +288,8 @@ export class AiChatService {
       model: openai.responses('gpt-4.1-mini'),
       messages: [...createSystemMessages(excelFilePath), ...messages],
       temperature: 0.3, // Lower temperature for more consistent medical analysis
-      maxOutputTokens: 1500, // Reduced to prevent excessive output
-      stopWhen: stepCountIs(5),
+      maxOutputTokens: 1000, // Reduced to prevent excessive output
+      stopWhen: stepCountIs(4),
       tools: {
         // Web search tool for medical research - WITH USAGE TRACKING
         web_search_preview: openai.tools.webSearchPreview({
