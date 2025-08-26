@@ -168,14 +168,14 @@ export class AiChatService {
           
           Sử dụng tool này khi:
           - Bác sĩ muốn xem chi tiết hồ sơ sức khỏe của bệnh nhân
-          - Cần xem lịch sử khám, kết quả xét nghiệm, file y tế
+          - Cần xem lịch sử khám, kết quả xét nghiệm, chẩn đoán
           - Xem thông tin từ EHR_url (hồ sơ y tế điện tử)
           
           THÔNG TIN CÓ SẴN:
           - Thông tin cơ bản bệnh nhân (tên, ngày sinh, giới tính, CMND)
           - Lịch sử khám: ngày khám, loại xét nghiệm, kết quả
           - Hồ sơ y tế chi tiết từ EHR_url (JSON format)
-          - File y tế: hình ảnh, báo cáo, kết quả xét nghiệm
+          - Chẩn đoán, đơn thuốc, kết quả xét nghiệm
           - Thông tin validation và comment từ bác sĩ
           
           WORKFLOW:
@@ -185,7 +185,9 @@ export class AiChatService {
           QUAN TRỌNG:
           - Tool này tự động áp dụng bảo mật theo DoctorId
           - Chỉ trả về thông tin bệnh nhân thuộc quyền quản lý của bác sĩ hiện tại
-          - EHR_url chứa thông tin chi tiết nhất về hồ sơ y tế`,
+          - EHR_url chứa thông tin chi tiết nhất về hồ sơ y tế
+          - KHÔNG trả về link S3, file path, hoặc URL nội bộ
+          - Chỉ trả về thông tin y tế cần thiết cho bác sĩ`,
           inputSchema: z.object({
             patientIdentifier: z.object({
               patientName: z
@@ -896,7 +898,7 @@ except Exception as e:
         };
       }
 
-      // Process EHR_url data if available
+      // Process EHR_url data if available - EXCLUDE S3 links and file paths
       const processedRecords = records.map((record: any) => {
         let ehrData: any = null;
         if (record.EHR_url) {
@@ -907,17 +909,37 @@ except Exception as e:
           }
         }
 
+        // Clean and extract only medical information, exclude file paths and S3 links
+        const cleanEhrData = this.cleanEhrDataForDoctor(ehrData);
+
         return {
-          ...record,
-          ehrData,
-          // Extract key information from EHR data
-          labCode: ehrData?.[0]?.labcode || null,
-          testType: ehrData?.[0]?.type || null,
-          fileUrl: ehrData?.[0]?.file_url || null,
-          excelResult: ehrData?.[0]?.excelResult || record.excelResult,
-          htmlResult: ehrData?.[0]?.htmlResult || record.htmlResult,
-          validationComment:
-            ehrData?.[0]?.validationInfo?.commentResult || record.commentResult,
+          // Basic patient info
+          PatientKey: record.PatientKey,
+          FullName: record.FullName,
+          DateOfBirth: record.DateOfBirth,
+          Gender: record.Gender,
+          citizenID: record.citizenID,
+          Address: record.Address,
+
+          // Visit info
+          VisitDate: record.VisitDate,
+          VisitLocation: record.VisitLocation,
+          TestName: record.TestName,
+          TestCategory: record.TestCategory,
+          DiagnosisDescription: record.DiagnosisDescription,
+
+          // Clean EHR data (no file paths)
+          ehrData: cleanEhrData,
+
+          // Extract key medical information
+          appointmentInfo: cleanEhrData?.appointment || null,
+          patientInfo: cleanEhrData?.patient || null,
+          medicalRecord: cleanEhrData?.medical_record || null,
+          labTests: cleanEhrData?.lab_tests || null,
+          prescription: cleanEhrData?.prescription || null,
+
+          // Comments
+          commentResult: record.commentResult,
         };
       });
 
@@ -943,7 +965,7 @@ except Exception as e:
         healthRecords: includeHistory ? processedRecords : [],
         totalRecords: records.length,
         message: `Đã tìm thấy ${records.length} lần khám của bệnh nhân ${patientSummary.fullName}.`,
-        note: 'Thông tin chi tiết hồ sơ y tế được lưu trong EHR_url (JSON format).',
+        note: 'Thông tin chi tiết hồ sơ y tế đã được làm sạch, loại bỏ link S3 và file path. Chỉ hiển thị thông tin y tế cần thiết cho bác sĩ.',
       };
     } catch (error) {
       this.logger.error(`Get patient health records error: ${error.message}`);
@@ -1025,6 +1047,72 @@ except Exception as e:
           'Hãy kiểm tra lại cú pháp ClickHouse SQL hoặc điều kiện WHERE bảo mật',
       };
     }
+  }
+
+  /**
+   * Clean EHR data to remove S3 links, file paths, and internal URLs
+   * Only return medical information relevant for doctors
+   */
+  private cleanEhrDataForDoctor(ehrData: any): any {
+    if (!ehrData || typeof ehrData !== 'object') {
+      return ehrData;
+    }
+
+    // Deep clone to avoid modifying original data
+    const cleanData = JSON.parse(JSON.stringify(ehrData));
+
+    // Remove file paths and S3 links from lab tests
+    if (cleanData.medical_record?.lab_test) {
+      cleanData.medical_record.lab_test = cleanData.medical_record.lab_test.map(
+        (test: any) => {
+          const cleanTest = { ...test };
+
+          // Remove file attachments and URLs
+          delete cleanTest.file_attachments;
+          delete cleanTest.file_url;
+          delete cleanTest.url;
+          delete cleanTest.path;
+
+          // Keep only medical information
+          return {
+            test_type: cleanTest.test_type,
+            test_name: cleanTest.test_name,
+            machine: cleanTest.machine,
+            taken_by: cleanTest.taken_by,
+            notes: cleanTest.notes,
+            conclusion: cleanTest.conclusion,
+            results: cleanTest.results || [],
+          };
+        },
+      );
+    }
+
+    // Remove any other file paths or URLs
+    const removeFilePaths = (obj: any) => {
+      if (obj && typeof obj === 'object') {
+        Object.keys(obj).forEach((key) => {
+          if (
+            typeof obj[key] === 'string' &&
+            (obj[key].includes('/path/to/') ||
+              obj[key].includes('s3://') ||
+              obj[key].includes('http://') ||
+              obj[key].includes('https://') ||
+              obj[key].includes('.pdf') ||
+              obj[key].includes('.dcm') ||
+              obj[key].includes('.jpg') ||
+              obj[key].includes('.png'))
+          ) {
+            delete obj[key];
+          } else if (typeof obj[key] === 'object') {
+            removeFilePaths(obj[key]);
+          }
+        });
+      }
+    };
+
+    removeFilePaths(cleanData);
+
+    return cleanData;
   }
 
   private generateClinicalSearchQueries(
