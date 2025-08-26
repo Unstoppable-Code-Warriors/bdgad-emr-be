@@ -30,6 +30,12 @@ export class AiChatService {
       maxOutputTokens: 2000,
       stopWhen: stepCountIs(10),
       tools: {
+        web_search_preview: openai.tools.webSearchPreview({
+          toModelOutput: (output) => {
+            this.logger.log('Web search performed');
+            return output;
+          },
+        }),
         // Tool để khám phá schema của ClickHouse
         exploreClickHouseSchema: tool({
           description: `Khám phá cấu trúc schema của ClickHouse để hiểu các bảng và cột có sẵn.
@@ -71,10 +77,11 @@ export class AiChatService {
 
         // Tool để tìm kiếm bệnh nhân và trả về danh sách
         searchPatients: tool({
-          description: `Tìm kiếm cơ bản bệnh nhân trong hệ thống EMR với nhiều tiêu chí linh hoạt.
+          description: `Tìm kiếm và đếm số lượng bệnh nhân trong hệ thống EMR với nhiều tiêu chí linh hoạt.
           
           Sử dụng tool này khi:
-          - Tìm kiếm, đếm số lượng bệnh nhân cơ bản
+          - Đếm tổng số bệnh nhân mà bác sĩ đang quản lý
+          - Tìm kiếm, đếm số lượng bệnh nhân theo tiêu chí cụ thể
           - Tìm kiếm bệnh nhân theo tên, CMND, giới tính
           - Tìm theo độ tuổi (khoảng năm sinh)
           - Tìm theo số lần khám (khoảng từ X đến Y lần)
@@ -86,12 +93,14 @@ export class AiChatService {
           - Hỗ trợ khoảng số lần khám (minVisitCount, maxVisitCount)  
           - Hỗ trợ khoảng thời gian khám (fromVisitDate, toVisitDate)
           - Có thể kết hợp nhiều điều kiện
+          - Khi không có tiêu chí nào: trả về tổng số bệnh nhân đang quản lý
           
           QUAN TRỌNG: 
           - Sau khi gọi tool này, CHỈ trả lời số lượng bệnh nhân tìm được
           - KHÔNG đưa ra thông tin chi tiết của bệnh nhân
           - KHÔNG đề cập đến tên bảng, tên cột hay thuật ngữ kỹ thuật
-          - Trả lời đơn giản, dễ hiểu cho bác sĩ`,
+          - Trả lời đơn giản, dễ hiểu cho bác sĩ
+          - Ví dụ: "Bạn đang quản lý X bệnh nhân" hoặc "Tìm thấy X bệnh nhân phù hợp với tiêu chí"`,
           inputSchema: z.object({
             searchCriteria: z.object({
               name: z
@@ -786,6 +795,7 @@ except Exception as e:
         results: patients,
         totalFound: patients.length,
         message: `Đã tìm thấy ${patients.length} bệnh nhân phù hợp với tiêu chí tìm kiếm.`,
+        isTotalCount: false,
       };
     } catch (error) {
       this.logger.error(`Patient search error: ${error.message}`);
