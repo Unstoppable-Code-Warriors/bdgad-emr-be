@@ -9,6 +9,13 @@ import * as FormData from 'form-data';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const VCF_FILES = [
+  'MYH7_MYBPC3.vcf.gz', // Cơ tim
+  'BRCA_50k.vcf.gz', // Bệnh ung thư vú, ung thư buồng trứng
+  'DNAH_50k.vcf.gz', // Vô sinh do tinh trùng bất động
+  'MLH1_MSH2_MSH6_PMS2_50k.vcf.gz', // Ung thư đại trực tràng
+];
+
 @Injectable()
 export class MockEtlService {
   private readonly logger = new Logger(MockEtlService.name);
@@ -23,6 +30,34 @@ export class MockEtlService {
     this.vcfPath = this.configService.get<string>('VCF_PATH') || '';
   }
 
+  private getIndexBasedOnFastQSuffix(fastQUrl: string) {
+    try {
+      const fastQSuffix = fastQUrl
+        .split('/')
+        ?.pop()
+        ?.split('_')
+        .pop()
+        ?.split('.')[0];
+      if (!fastQSuffix) {
+        return 0;
+      }
+      switch (fastQSuffix) {
+        case 'A':
+          return 0;
+        case 'B':
+          return 1;
+        case 'C':
+          return 2;
+        case 'D':
+          return 3;
+        default:
+          return 0;
+      }
+    } catch (error) {
+      return 0;
+    }
+  }
+
   async startAnalyze(body: MockEtlReqDto) {
     this.logger.log('startAnalyze', body);
     let tempFilePath: string | null = null;
@@ -35,17 +70,8 @@ export class MockEtlService {
         this.vcfPath.startsWith('s3://') &&
         (this.vcfPath.split('/').length <= 4 || this.vcfPath.endsWith('/'))
       ) {
-        const allUrls = await this.s3Service.listObjectUrlsByPrefix(
-          this.vcfPath,
-        );
-        const vcfUrls = allUrls.filter(
-          (u) => u.endsWith('.vcf') || u.endsWith('.vcf.gz'),
-        );
-        if (vcfUrls.length === 0) {
-          throw new Error(`No VCF files found under prefix: ${this.vcfPath}`);
-        }
-        const randomIndex = Math.floor(Math.random() * vcfUrls.length);
-        selectedS3Url = vcfUrls[randomIndex];
+        const index = this.getIndexBasedOnFastQSuffix(body.fastq_1_url);
+        selectedS3Url = `${this.vcfPath}/${VCF_FILES[index]}`;
         this.logger.log(`Selected random VCF: ${selectedS3Url}`);
       }
 
