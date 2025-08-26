@@ -28,7 +28,8 @@ export class MockEtlService {
   async startAnalyze(body: MockEtlReqDto) {
     this.logger.log('startAnalyze', body);
     let tempFilePath: string | null = null;
-    const analysisVcfPath = body.tumor ? this.tumorVcfPath : this.vcfPath;
+    const { tumor = true } = body;
+    const analysisVcfPath = tumor ? this.tumorVcfPath : this.vcfPath;
 
     try {
       // 1. Download VCF file from S3 to local temp folder

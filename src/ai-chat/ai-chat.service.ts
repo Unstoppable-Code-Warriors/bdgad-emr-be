@@ -179,8 +179,9 @@ export class AiChatService {
           - Thông tin validation và comment từ bác sĩ
           
           WORKFLOW:
-          - Bước 1: Tìm bệnh nhân theo tên hoặc CMND
+          - Bước 1: Tìm bệnh nhân theo tên hoặc CMND (nếu trùng tên: yêu cầu làm rõ)
           - Bước 2: Lấy chi tiết hồ sơ sức khỏe và lịch sử khám
+          - Có thể lọc theo loại thông tin bằng Location: xét nghiệm=bdgad, hồ sơ=pharmacy, thẩm định=test-result
           
           QUAN TRỌNG:
           - Tool này tự động áp dụng bảo mật theo DoctorId
@@ -199,6 +200,17 @@ export class AiChatService {
                 .optional()
                 .describe('CMND/CCCD của bệnh nhân (nếu không có tên)'),
             }),
+            recordType: z
+              .enum(['exam', 'medical', 'validation'])
+              .optional()
+              .describe(
+                "Lọc theo loại thông tin: 'exam'(xét nghiệm), 'medical'(hồ sơ), 'validation'(thẩm định)",
+              ),
+            countOnly: z
+              .boolean()
+              .optional()
+              .default(false)
+              .describe('Chỉ trả về số lượng bản ghi theo bộ lọc'),
             includeHistory: z
               .boolean()
               .optional()
@@ -206,10 +218,18 @@ export class AiChatService {
               .describe('Có bao gồm lịch sử khám chi tiết không'),
             purpose: z.string().describe('Mục đích xem hồ sơ (để logging)'),
           }),
-          execute: async ({ patientIdentifier, includeHistory, purpose }) => {
+          execute: async ({
+            patientIdentifier,
+            recordType,
+            countOnly,
+            includeHistory,
+            purpose,
+          }) => {
             return await this.executeGetPatientHealthRecords(
               patientIdentifier,
               includeHistory,
+              recordType,
+              countOnly ?? false,
               purpose,
               user.id,
             );
@@ -432,7 +452,7 @@ try:
     structure_info = {}
     
     for sheet_name, sheet_data in excel_data.items():
-        print(f"\\n📊 Sheet '{sheet_name}':")
+        print(f"\n📊 Sheet '{sheet_name}':")
         print(f"  - Rows: {len(sheet_data)}")
         print(f"  - Columns: {len(sheet_data.columns)}")
         
@@ -460,7 +480,7 @@ try:
                 'key_columns': key_cols
             }
     
-    print(f"\\n✅ EXPLORATION COMPLETED")
+    print(f"\n✅ EXPLORATION COMPLETED")
     print(f"Structure info saved for strategy planning.")
     
     # Save structure info for next steps
@@ -824,6 +844,8 @@ except Exception as e:
       citizenId?: string;
     },
     includeHistory: boolean,
+    recordType: 'exam' | 'medical' | 'validation' | undefined,
+    countOnly: boolean,
     purpose: string,
     doctorId: number,
   ) {
@@ -849,6 +871,16 @@ except Exception as e:
           `p.citizenID = '${patientIdentifier.citizenId.replace(/'/g, "''")}'`,
         );
       }
+
+      // Determine optional Location filter by recordType
+      const locationByType: Record<string, string> = {
+        exam: 'bdgad',
+        medical: 'pharmacy',
+        validation: 'test-result',
+      };
+      const targetLocation = recordType
+        ? locationByType[recordType]
+        : undefined;
 
       // Build the query to get patient health records
       const query = `
@@ -879,6 +911,7 @@ except Exception as e:
         LEFT JOIN default.DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
         WHERE (${patientConditions.join(' OR ')})
           AND dp.DoctorId = ${doctorId}
+          ${targetLocation ? `AND f.Location = '${targetLocation}'` : ''}
         ORDER BY f.DateReceived DESC
       `;
 
@@ -956,6 +989,20 @@ except Exception as e:
         lastVisit: records[0]?.DateReceived,
       };
 
+      if (countOnly) {
+        return {
+          success: true,
+          purpose,
+          doctorId,
+          patientIdentifier,
+          patient: patientSummary,
+          recordType,
+          location: targetLocation,
+          total: records.length,
+          message: `Tìm thấy ${records.length} lần${recordType ? ` cho loại '${recordType}'` : ''}.`,
+        };
+      }
+
       return {
         success: true,
         purpose,
@@ -964,7 +1011,7 @@ except Exception as e:
         patientSummary,
         healthRecords: includeHistory ? processedRecords : [],
         totalRecords: records.length,
-        message: `Đã tìm thấy ${records.length} lần khám của bệnh nhân ${patientSummary.fullName}.`,
+        message: `Đã tìm thấy ${records.length} lần khám của bệnh nhân ${patientSummary.fullName}${recordType ? ` (lọc theo '${recordType}')` : ''}.`,
         note: 'Thông tin chi tiết hồ sơ y tế đã được làm sạch, loại bỏ link S3 và file path. Chỉ hiển thị thông tin y tế cần thiết cho bác sĩ.',
       };
     } catch (error) {
@@ -1045,6 +1092,189 @@ except Exception as e:
         message: `Có lỗi xảy ra khi thực hiện truy vấn ClickHouse. Vui lòng kiểm tra cú pháp SQL.`,
         suggestion:
           'Hãy kiểm tra lại cú pháp ClickHouse SQL hoặc điều kiện WHERE bảo mật',
+      };
+    }
+  }
+
+  /**
+   * Count records by type (exam/medical/validation) for a given patient, with joins and EHR summary
+   */
+  private async executeCountPatientRecords(
+    patientIdentifier: { patientName?: string; citizenId?: string },
+    recordType: 'exam' | 'medical' | 'validation',
+    includeList: boolean,
+    purpose: string,
+    doctorId: number,
+  ) {
+    try {
+      this.logger.log(
+        `Count patient records by type for doctor ${doctorId}: ${purpose}`,
+      );
+
+      if (!patientIdentifier.patientName && !patientIdentifier.citizenId) {
+        throw new Error('Cần cung cấp tên hoặc CMND của bệnh nhân để đếm');
+      }
+
+      // Determine location filter
+      const locationByType: Record<string, string> = {
+        exam: 'bdgad',
+        medical: 'pharmacy',
+        validation: 'test-result',
+      };
+      const targetLocation = locationByType[recordType];
+
+      // Step 1: find patient(s)
+      const patientConds: string[] = [];
+      if (patientIdentifier.patientName) {
+        patientConds.push(
+          `LOWER(p.FullName) LIKE LOWER('%${patientIdentifier.patientName.replace(/'/g, "''")}%')`,
+        );
+      }
+      if (patientIdentifier.citizenId) {
+        patientConds.push(
+          `p.citizenID = '${patientIdentifier.citizenId.replace(/'/g, "''")}'`,
+        );
+      }
+
+      const patientQuery = `
+        SELECT p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, p.citizenID
+        FROM default.DimPatient p
+        WHERE ${patientConds.join(' OR ')}
+        LIMIT 5
+      `;
+
+      const patientResult = await this.clickHouseService.query(patientQuery);
+      const patients: any[] = patientResult.data || [];
+
+      if (patients.length === 0) {
+        return {
+          success: false,
+          purpose,
+          doctorId,
+          patientIdentifier,
+          message: 'Không tìm thấy bệnh nhân phù hợp.',
+          needDisambiguation: false,
+        };
+      }
+
+      if (patients.length > 1 && !patientIdentifier.citizenId) {
+        return {
+          success: false,
+          purpose,
+          doctorId,
+          patientIdentifier,
+          message:
+            'Có nhiều bệnh nhân trùng tên. Vui lòng cung cấp CMND hoặc chi tiết hơn.',
+          needDisambiguation: true,
+          candidates: patients.map((p) => ({
+            patientKey: p.PatientKey,
+            fullName: p.FullName,
+            dateOfBirth: p.DateOfBirth,
+            gender: p.Gender,
+            citizenId: p.citizenID,
+          })),
+        };
+      }
+
+      const patientKey = patients[0].PatientKey;
+
+      // Step 2: count records filtered by Location and doctor restriction, join DimTestRun
+      const baseSelect = includeList
+        ? `
+          SELECT 
+            f.PatientKey,
+            f.DateReceived,
+            f.Location,
+            f.ProviderKey,
+            dt.TestRunKey,
+            dt.EHR_url
+          FROM default.FactGeneticTestResult f
+          INNER JOIN default.DimProvider dp ON f.ProviderKey = dp.ProviderKey
+          LEFT JOIN default.DimTestRun dt ON f.TestRunKey = dt.TestRunKey
+          WHERE f.PatientKey = ${patientKey}
+            AND f.Location = '${targetLocation}'
+            AND dp.DoctorId = ${doctorId}
+          ORDER BY f.DateReceived DESC
+        `
+        : `
+          SELECT 
+            COUNT() as Count
+          FROM default.FactGeneticTestResult f
+          INNER JOIN default.DimProvider dp ON f.ProviderKey = dp.ProviderKey
+          WHERE f.PatientKey = ${patientKey}
+            AND f.Location = '${targetLocation}'
+            AND dp.DoctorId = ${doctorId}
+        `;
+
+      const recordsResult = await this.clickHouseService.query(baseSelect);
+      const data = recordsResult.data || recordsResult;
+
+      if (!includeList) {
+        const countValue =
+          Array.isArray(data) && data[0]?.Count !== undefined
+            ? Number(data[0].Count)
+            : 0;
+        return {
+          success: true,
+          purpose,
+          doctorId,
+          patientIdentifier,
+          patient: patients[0],
+          recordType,
+          location: targetLocation,
+          total: countValue,
+          message: `Tìm thấy ${countValue} lần cho loại '${recordType}'.`,
+        };
+      }
+
+      // Include list: summarize EHR_url
+      const list = (Array.isArray(data) ? data : []).map((r: any) => {
+        let summary: any = null;
+        if (r.EHR_url) {
+          try {
+            const parsed = JSON.parse(r.EHR_url);
+            summary = {
+              appointment: parsed?.appointment || null,
+              patient: parsed?.patient || null,
+              medical_record: parsed?.medical_record
+                ? { ...parsed.medical_record, attachments: undefined }
+                : null,
+            };
+          } catch (e) {
+            summary = { raw: r.EHR_url };
+          }
+        }
+        return {
+          date: r.DateReceived,
+          testRunKey: r.TestRunKey,
+          location: r.Location,
+          ehrSummary: this.cleanEhrDataForDoctor(summary),
+        };
+      });
+
+      return {
+        success: true,
+        purpose,
+        doctorId,
+        patientIdentifier,
+        patient: patients[0],
+        recordType,
+        location: targetLocation,
+        total: list.length,
+        list,
+        message: `Đã lấy ${list.length} bản ghi cho loại '${recordType}'.`,
+      };
+    } catch (error) {
+      this.logger.error(`Count patient records error: ${error.message}`);
+      return {
+        success: false,
+        purpose,
+        doctorId,
+        patientIdentifier,
+        recordType,
+        error: error.message,
+        message:
+          'Có lỗi xảy ra khi đếm bản ghi bệnh nhân. Vui lòng thử lại hoặc cung cấp thêm thông tin.',
       };
     }
   }
