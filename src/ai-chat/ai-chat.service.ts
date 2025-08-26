@@ -289,7 +289,7 @@ export class AiChatService {
       messages: [...createSystemMessages(excelFilePath), ...messages],
       temperature: 0.3, // Lower temperature for more consistent medical analysis
       maxOutputTokens: 1500, // Reduced to prevent excessive output
-      stopWhen: stepCountIs(6), // Reduced from 10 to 6: 4 analysis steps + 1 web search + 1 final report
+      stopWhen: stepCountIs(7), // Reduced from 10 to 6: 4 analysis steps + 1 web search + 1 final report
       tools: {
         // Web search tool for medical research - WITH USAGE TRACKING
         web_search_preview: openai.tools.webSearchPreview({
@@ -710,10 +710,7 @@ except Exception as e:
       // Build WHERE conditions
       const conditions: string[] = [];
 
-      // Authorization: include patients where the doctor has at least one prior visit
-      conditions.push(
-        `EXISTS (SELECT 1 FROM default.FactGeneticTestResult f2 INNER JOIN default.DimProvider dp2 ON f2.ProviderKey = dp2.ProviderKey WHERE f2.PatientKey = p.PatientKey AND dp2.DoctorId = ${doctorId})`,
-      );
+      // Authorization will be enforced via EXISTS on patient-level, not filtering all visits by doctor
 
       if (searchCriteria.name) {
         conditions.push(
@@ -763,7 +760,15 @@ except Exception as e:
         }
       }
 
-      const whereClause = conditions.join(' AND ');
+      // Authorization: doctor must have at least one record with the patient
+      const authExists = `EXISTS (
+        SELECT 1
+        FROM default.FactGeneticTestResult f2
+        INNER JOIN default.DimProvider dp2 ON f2.ProviderKey = dp2.ProviderKey
+        WHERE f2.PatientKey = p.PatientKey AND dp2.DoctorId = ${doctorId}
+      )`;
+
+      const whereClause = [authExists, ...conditions].join(' AND ');
       const limit = searchCriteria.limit || 20;
 
       // Build HAVING clause for visit count range
@@ -783,7 +788,7 @@ except Exception as e:
           ? `HAVING ${havingConditions.join(' AND ')}`
           : '';
 
-      // Build the optimized query - Deduplicate visits by (TestRunKey, Location) and count all visits (not limited to the doctor's own)
+      // Build the optimized query - Deduplicate visits by (TestRunKey, Location)
       const query = `
         SELECT 
           p.PatientKey as PatientKey,
