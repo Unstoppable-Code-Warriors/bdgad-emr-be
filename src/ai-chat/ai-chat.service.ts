@@ -177,6 +177,12 @@ export class AiChatService {
           - Hồ sơ y tế chi tiết từ EHR_url (JSON format)
           - Chẩn đoán, đơn thuốc, kết quả xét nghiệm
           - Thông tin validation và comment từ bác sĩ
+
+          PHÂN BIỆT NGỮ CẢNH VÀ BỘ LỌC LOCATION:
+          - Nếu bác sĩ hỏi về "lần xét nghiệm" hoặc "lần khám" → lọc Location = 'bdgad' (kết quả xét nghiệm)
+          - Nếu bác sĩ hỏi về "hồ sơ y tế" hoặc "thông tin y tế" → lọc Location = 'pharmacy' (hồ sơ/phiếu khám theo chuẩn EMR)
+          - Nếu không chỉ định rõ → trả về toàn bộ lịch sử theo quyền bác sĩ (không lọc Location)
+          - Có thể set tham số recordType = 'exam' | 'medical' | 'validation' để chỉ định rõ ràng
           
           WORKFLOW:
           - Bước 1: Gọi searchPatients để lấy danh sách và chọn bệnh nhân (lấy PatientKey)
