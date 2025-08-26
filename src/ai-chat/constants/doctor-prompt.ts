@@ -17,6 +17,7 @@ NGUYÊN TẮC LÀM VIỆC:
 NGUYÊN TẮC AN TOÀN:
 - Chỉ truy cập dữ liệu bệnh nhân thuộc quyền quản lý của bác sĩ hiện tại
 - Không đề cập tên bảng, cột hay thuật ngữ kỹ thuật database
+- Không đề cập đến các thuật ngữ Location như "bdgad", "pharmacy", "test-result" trong câu trả lời
 - Trả lời bằng tiếng Việt, đơn giản, dễ hiểu
 
 HƯỚNG DẪN SCHEMA (ClickHouse):
@@ -113,6 +114,7 @@ VÍ DỤ PHÂN BIỆT LOCATION:
 NGUYÊN TẮC:
 - Tool "searchPatients": công cụ chính, ưu tiên tuyệt đối
 - Không đề cập tên bảng, cột, thuật ngữ database
+- Không đề cập đến các thuật ngữ Location như "bdgad", "pharmacy", "test-result" trong câu trả lời
 - Trả lời tiếng Việt, đơn giản, dễ hiểu
 - Mọi dữ liệu mặc định thuộc quyền quản lý của bác sĩ hiện tại`;
 };

@@ -61,7 +61,9 @@ export class AiChatService {
           PHÂN BIỆT LOCATION:
           - XÉT NGHIỆM: Location = 'bdgad' (kết quả xét nghiệm, lab tests)
           - HỒ SƠ Y TẾ: Location = 'pharmacy' (phiếu khám, chẩn đoán, đơn thuốc)
-          - THẨM ĐỊNH: Location = 'test-result' (kết quả thẩm định, validation)`,
+          - THẨM ĐỊNH: Location = 'test-result' (kết quả thẩm định, validation)
+          
+          LƯU Ý: KHÔNG đề cập đến các thuật ngữ Location này trong câu trả lời cho bác sĩ`,
           inputSchema: z.object({
             action: z
               .enum(['list_tables', 'describe_table'])
@@ -118,6 +120,7 @@ export class AiChatService {
           - Sau khi gọi tool này, CHỈ trả lời số lượng bệnh nhân tìm được
           - KHÔNG đưa ra thông tin chi tiết của bệnh nhân
           - KHÔNG đề cập đến tên bảng, tên cột hay thuật ngữ kỹ thuật
+          - KHÔNG đề cập đến các thuật ngữ Location như "bdgad", "pharmacy", "test-result"
           - Trả lời đơn giản, dễ hiểu cho bác sĩ
           - Ví dụ: "Bạn đang quản lý X bệnh nhân" hoặc "Tìm thấy X bệnh nhân phù hợp với tiêu chí"`,
           inputSchema: z.object({
@@ -217,6 +220,7 @@ export class AiChatService {
           - Chỉ trả về thông tin bệnh nhân thuộc quyền quản lý của bác sĩ hiện tại
           - EHR_url chứa thông tin chi tiết nhất về hồ sơ y tế
           - KHÔNG trả về link S3, file path, hoặc URL nội bộ
+          - KHÔNG đề cập đến các thuật ngữ Location như "bdgad", "pharmacy", "test-result"
           - Chỉ trả về thông tin y tế cần thiết cho bác sĩ`,
           inputSchema: z.object({
             patientKey: z
@@ -299,7 +303,8 @@ export class AiChatService {
           - HOẶC: WHERE [table].ProviderKey IN (SELECT ProviderKey FROM default.DimProvider WHERE DoctorId = ${user.id})
           - Sử dụng cú pháp ClickHouse: backticks cho table/column names, toDate(), formatDateTime(), etc.
           - Database prefix: default.TableName
-          - Không được thiếu điều kiện bảo mật trong bất kỳ truy vấn nào`,
+          - Không được thiếu điều kiện bảo mật trong bất kỳ truy vấn nào
+          - KHÔNG đề cập đến các thuật ngữ Location như "bdgad", "pharmacy", "test-result" trong câu trả lời`,
           inputSchema: z.object({
             query: z
               .string()
