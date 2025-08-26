@@ -913,6 +913,32 @@ except Exception as e:
 
       const patientKey = candidates[0].PatientKey;
 
+      // Authorize: doctor can see full history if they have at least 1 record with this patient
+      const authQuery = `
+        SELECT count() AS c
+        FROM default.FactGeneticTestResult f
+        INNER JOIN default.DimProvider dp ON f.ProviderKey = dp.ProviderKey
+        WHERE f.PatientKey = ${patientKey} AND dp.DoctorId = ${doctorId}
+        LIMIT 1
+      `;
+      const authResult = await this.clickHouseService.query(authQuery);
+      const authorizedCount =
+        Array.isArray(authResult.data) && authResult.data[0]?.c !== undefined
+          ? Number(authResult.data[0].c)
+          : 0;
+      if (authorizedCount === 0) {
+        return {
+          success: false,
+          purpose,
+          doctorId,
+          patientIdentifier,
+          message:
+            'Bạn chưa từng phụ trách bệnh nhân này nên không có quyền xem lịch sử đầy đủ.',
+          suggestion:
+            'Chỉ xem được bệnh nhân do bạn phụ trách ít nhất một lần.',
+        };
+      }
+
       // Determine optional Location filter by recordType (normalized)
       const locationByType: Record<string, string> = {
         exam: 'bdgad',
@@ -926,7 +952,7 @@ except Exception as e:
         ? "AND lower(trim(BOTH ' ' FROM f.Location)) = '" + targetLocation + "'"
         : '';
 
-      // Build the query to get patient health records (use PatientKey and doctor restriction)
+      // Build the query to get patient health records (use PatientKey, full history, no per-row DoctorId filter)
       const query = `
         SELECT 
           p.PatientKey,
@@ -949,12 +975,10 @@ except Exception as e:
           d.DiagnosisDescription
         FROM default.DimPatient p
         INNER JOIN default.FactGeneticTestResult f ON p.PatientKey = f.PatientKey
-        INNER JOIN default.DimProvider dp ON f.ProviderKey = dp.ProviderKey
         LEFT JOIN default.DimTestRun dt ON f.TestRunKey = dt.TestRunKey
         LEFT JOIN default.DimTest t ON f.TestKey = t.TestKey
         LEFT JOIN default.DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
         WHERE p.PatientKey = ${patientKey}
-          AND dp.DoctorId = ${doctorId}
           ${locationFilter}
         ORDER BY f.DateReceived DESC
       `;
