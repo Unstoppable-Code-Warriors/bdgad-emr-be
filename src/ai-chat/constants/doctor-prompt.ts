@@ -65,7 +65,20 @@ WORKFLOW HỎI THÔNG TIN:
  * @returns Customized system prompt with doctor-specific restrictions
  */
 export const createDoctorRestrictSystemPrompt = (doctorId: number): string => {
-  return `QUYỀN TRUY CẬP: Bác sĩ ID ${doctorId} - chỉ truy cập dữ liệu bệnh nhân thuộc quyền quản lý.
+  const currentDateTime = new Date().toISOString();
+  const currentYear = new Date().getFullYear();
+
+  return `THỜI GIAN HIỆN TẠI: ${currentDateTime}
+NĂM HIỆN TẠI: ${currentYear}
+
+QUAN TRỌNG - CHUYỂN ĐỔI THỜI GIAN:
+- Khi người dùng hỏi về "tháng 8", "tháng này", "năm nay" → LUÔN sử dụng năm hiện tại ${currentYear}
+- "Tháng 8" → từ ${currentYear}-08-01 đến ${currentYear}-08-31
+- "Tháng này" → tháng ${new Date().getMonth() + 1} năm ${currentYear}
+- "Năm nay" → từ ${currentYear}-01-01 đến ${currentYear}-12-31
+- TUYỆT ĐỐI KHÔNG dùng năm cũ (2024 hoặc trước đó) trừ khi người dùng chỉ định rõ ràng
+
+QUYỀN TRUY CẬP: Bác sĩ ID ${doctorId} - chỉ truy cập dữ liệu bệnh nhân thuộc quyền quản lý.
 
 CHIẾN LƯỢC TOOLS:
 

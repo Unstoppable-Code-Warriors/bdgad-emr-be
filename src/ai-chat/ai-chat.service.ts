@@ -95,6 +95,13 @@ export class AiChatService {
           - Tìm bệnh nhân có khám trong khoảng thời gian cụ thể
           - KHÔNG dùng khi cần xem chi tiết thông tin bệnh nhân
           
+          XỬ LÝ THỜI GIAN ĐẶC BIỆT:
+          - "tháng 8", "tháng 8 năm 2025" → fromVisitDate: "2025-08-01", toVisitDate: "2025-08-31"
+          - "tháng này" → fromVisitDate: "2025-08-01", toVisitDate: "2025-08-31" (tháng hiện tại)
+          - "năm nay", "2025" → fromVisitDate: "2025-01-01", toVisitDate: "2025-12-31"
+          - "tuần này" → tính từ thứ 2 đến chủ nhật tuần hiện tại
+          - "hôm nay" → fromVisitDate và toVisitDate cùng ngày hiện tại
+          
           Các tính năng tìm kiếm:
           - Hỗ trợ khoảng ngày sinh (fromDob, toDob)
           - Hỗ trợ khoảng số lần khám (minVisitCount, maxVisitCount)  
@@ -113,16 +120,29 @@ export class AiChatService {
           
           TỰ ĐỘNG PHÁT HIỆN YÊU CẦU:
           - "tất cả bệnh nhân", "tất cả", "danh sách bệnh nhân" → tự động gọi tool với searchCriteria rỗng
-          - "có bao nhiêu bệnh nhân", "đang quản lý bao nhiêu" → tự động gọi tool với searchCriteria rỗng
+          - "có bao nhiêu bệnh nhân", "đang quản lý bao nhiêu" → tự động gọi tool với searchCriteria rỗng, limit cao để đếm chính xác
           - "liệt kê bệnh nhân" → tự động gọi tool với searchCriteria rỗng
+          - "bệnh nhân trong tháng 8" → fromVisitDate: "2025-08-01", toVisitDate: "2025-08-31"
           
-          QUAN TRỌNG: 
-          - Sau khi gọi tool này, CHỈ trả lời số lượng bệnh nhân tìm được
-          - KHÔNG đưa ra thông tin chi tiết của bệnh nhân
+          LƯU Ý VỀ LIMIT:
+          - Khi ĐẾM SỐ LƯỢNG bệnh nhân: PHẢI để limit cao (ít nhất 100) để đảm bảo đếm chính xác
+          - Khi CHỈ LIỆT KÊ: có thể dùng limit thấp hơn (20-50)
+          - System sẽ tự động điều chỉnh limit nếu phát hiện purpose là đếm số lượng
+          
+          QUAN TRỌNG - CẤU TRÚC DỮ LIỆU TRẢ VỀ: 
+          - Tool trả về SearchPatientsResult với cấu trúc chuẩn cho FE
+          - results: Patient[] - mảng thông tin bệnh nhân (patientKey, fullName, dateOfBirth, gender, citizenID, address, lastTestDate, totalTests)
+          - totalFound: number - tổng số bệnh nhân tìm được
+          - success: boolean - trạng thái thành công
+          - message: string - thông báo kết quả
+          
+          SAU KHI GỌI TOOL:
+          - Hiển thị thông tin chi tiết của từng bệnh nhân (tên, ngày sinh, số lần khám)
+          - KHÔNG chỉ đưa ra số lượng mà còn thông tin cụ thể
           - KHÔNG đề cập đến tên bảng, tên cột hay thuật ngữ kỹ thuật
           - KHÔNG đề cập đến các thuật ngữ Location như "bdgad", "pharmacy", "test-result"
           - Trả lời đơn giản, dễ hiểu cho bác sĩ
-          - Ví dụ: "Bạn đang quản lý X bệnh nhân" hoặc "Tìm thấy X bệnh nhân phù hợp với tiêu chí"`,
+          - Ví dụ: "Tìm thấy X bệnh nhân: [danh sách tên, ngày sinh, số lần khám]"`,
           inputSchema: z.object({
             searchCriteria: z.object({
               name: z
@@ -166,7 +186,7 @@ export class AiChatService {
                 .number()
                 .optional()
                 .default(20)
-                .describe('Giới hạn số lượng kết quả (mặc định 20)'),
+                .describe('Giới hạn số lượng kết quả (mặc định 20). Khi ĐẾM SỐ LƯỢNG bệnh nhân, phải để limit cao (ít nhất 100) để đảm bảo đếm đủ tất cả bệnh nhân phù hợp.'),
             }),
             purpose: z.string().describe('Mục đích tìm kiếm (để logging)'),
           }),
@@ -806,138 +826,373 @@ finally:
     doctorId: number,
   ) {
     try {
-      this.logger.log(`Patient search by doctor ${doctorId}: ${purpose}`);
+      this.logger.log(`=== Patient search START ===`);
+      this.logger.log(`Doctor ID: ${doctorId}`);
+      this.logger.log(`Purpose: ${purpose}`);
+      this.logger.log(
+        `Search criteria:`,
+        JSON.stringify(searchCriteria, null, 2),
+      );
+      this.logger.log(
+        `AI input contains fromVisitDate: ${!!searchCriteria.fromVisitDate}`,
+      );
+      this.logger.log(
+        `AI input contains toVisitDate: ${!!searchCriteria.toVisitDate}`,
+      );
 
-      // Build WHERE conditions for patient-level filters
-      const patientConds: string[] = [];
+      const limit = searchCriteria.limit || 20;
+      const offset = 0; // For simplicity, not implementing pagination in AI chat
+
+      // Auto-adjust limit for counting purposes
+      const isCountingPurpose = purpose.toLowerCase().includes('đếm') || 
+                               purpose.toLowerCase().includes('bao nhiêu') ||
+                               purpose.toLowerCase().includes('count');
+      
+      let finalLimit = limit;
+      if (isCountingPurpose && limit < 100) {
+        finalLimit = 1000; // Use high limit for accurate counting
+        this.logger.log(`Auto-adjusted limit from ${limit} to ${finalLimit} for counting purpose`);
+      }
+
+      this.logger.log(`Final limit: ${finalLimit}, Counting purpose: ${isCountingPurpose}`);
+
+      // Build WHERE conditions for filtering
+      const filterConditions: string[] = [];
+      const patientFilterConditions: string[] = []; // For patient-level filters
+      const testFilterConditions: string[] = []; // For test-level filters
+      const queryParams: Record<string, any> = { doctorId };
+
+      this.logger.log(`=== Building filter conditions ===`);
 
       if (searchCriteria.name) {
-        patientConds.push(
-          `lowerUTF8(p.FullName) LIKE lowerUTF8('%${searchCriteria.name.replace(/'/g, "''")}%')`,
-        );
+        patientFilterConditions.push('p.FullName ILIKE {name:String}');
+        queryParams.name = `%${searchCriteria.name}%`;
+        this.logger.log(`Added name filter: ${queryParams.name}`);
       }
 
       if (searchCriteria.citizenId) {
-        patientConds.push(
-          `p.citizenID = '${searchCriteria.citizenId.replace(/'/g, "''")}'`,
-        );
+        // Handle citizenId as part of latest_patient_data CTE like PatientService
+        queryParams.citizenid = searchCriteria.citizenId;
+        this.logger.log(`Added citizenId filter: ${queryParams.citizenid}`);
       }
 
       if (searchCriteria.gender) {
-        patientConds.push(
-          `p.Gender = '${searchCriteria.gender.replace(/'/g, "''")}'`,
-        );
+        patientFilterConditions.push('p.Gender = {gender:String}');
+        queryParams.gender = searchCriteria.gender;
+        this.logger.log(`Added gender filter: ${queryParams.gender}`);
       }
 
-      // Date of birth conditions
+      // Date range filters for test dates
+      if (searchCriteria.fromVisitDate) {
+        try {
+          const dateFrom = new Date(searchCriteria.fromVisitDate)
+            .toISOString()
+            .split('T')[0];
+          testFilterConditions.push('f.DateReceived >= {dateFrom:Date}');
+          queryParams.dateFrom = dateFrom;
+          this.logger.log(`Added fromVisitDate filter: ${dateFrom}`);
+        } catch (error) {
+          this.logger.error(
+            `Invalid fromVisitDate format: ${searchCriteria.fromVisitDate}`,
+          );
+          throw new Error(
+            `Invalid fromVisitDate format: ${searchCriteria.fromVisitDate}`,
+          );
+        }
+      }
+
+      if (searchCriteria.toVisitDate) {
+        try {
+          const dateTo = new Date(searchCriteria.toVisitDate)
+            .toISOString()
+            .split('T')[0];
+          testFilterConditions.push('f.DateReceived <= {dateTo:Date}');
+          queryParams.dateTo = dateTo;
+          this.logger.log(`Added toVisitDate filter: ${dateTo}`);
+        } catch (error) {
+          this.logger.error(
+            `Invalid toVisitDate format: ${searchCriteria.toVisitDate}`,
+          );
+          throw new Error(
+            `Invalid toVisitDate format: ${searchCriteria.toVisitDate}`,
+          );
+        }
+      }
+
+      // Date of birth filters - handle both single date and range
       if (searchCriteria.dateOfBirth) {
-        patientConds.push(`p.DateOfBirth = '${searchCriteria.dateOfBirth}'`);
+        patientFilterConditions.push('p.DateOfBirth = {dateOfBirth:Date}');
+        queryParams.dateOfBirth = searchCriteria.dateOfBirth;
+        this.logger.log(`Added dateOfBirth filter: ${queryParams.dateOfBirth}`);
       } else {
         if (searchCriteria.fromDob) {
-          patientConds.push(`p.DateOfBirth >= '${searchCriteria.fromDob}'`);
+          patientFilterConditions.push('p.DateOfBirth >= {fromDob:Date}');
+          queryParams.fromDob = searchCriteria.fromDob;
+          this.logger.log(`Added fromDob filter: ${queryParams.fromDob}`);
         }
         if (searchCriteria.toDob) {
-          patientConds.push(`p.DateOfBirth <= '${searchCriteria.toDob}'`);
+          patientFilterConditions.push('p.DateOfBirth <= {toDob:Date}');
+          queryParams.toDob = searchCriteria.toDob;
+          this.logger.log(`Added toDob filter: ${queryParams.toDob}`);
         }
       }
 
-      const whereClause =
-        patientConds.length > 0 ? `WHERE ${patientConds.join(' AND ')}` : '';
-      const limit = searchCriteria.limit || 20;
+      // Handle month filter specially - need to extract year and month
+      // Check for month filter patterns
+      let isMonthFilter = false;
+      let year: number | null = null;
+      let month: number | null = null;
 
-      // Build JOIN conditions for visit date range and bdgad location
-      const joinConds: string[] = [];
-      // Only count exam visits in search (Location = 'bdgad') - XÉT NGHIỆM
-      joinConds.push(`lower(trim(BOTH ' ' FROM f.Location)) = 'bdgad'`);
-      if (searchCriteria.fromVisitDate) {
-        joinConds.push(
-          `f.DateReceived >= '${searchCriteria.fromVisitDate} 00:00:00'`,
-        );
-      }
-      if (searchCriteria.toVisitDate) {
-        joinConds.push(
-          `f.DateReceived <= '${searchCriteria.toVisitDate} 23:59:59'`,
-        );
-      }
-      const onClause = joinConds.length ? `AND ${joinConds.join(' AND ')}` : '';
+      if (searchCriteria.fromVisitDate && searchCriteria.toVisitDate) {
+        // Check if this looks like a month search (same month, first to last day)
+        const fromDate = new Date(searchCriteria.fromVisitDate);
+        const toDate = new Date(searchCriteria.toVisitDate);
 
-      // Build HAVING clause for visit count range (use distinct visits by TestRunKey only for bdgad)
-      const havingConditions: string[] = [];
-      if (searchCriteria.minVisitCount) {
-        havingConditions.push(
-          `countDistinct(f.TestRunKey) >= ${searchCriteria.minVisitCount}`,
+        if (
+          fromDate.getMonth() === toDate.getMonth() &&
+          fromDate.getFullYear() === toDate.getFullYear() &&
+          fromDate.getDate() === 1 &&
+          toDate.getDate() ===
+            new Date(toDate.getFullYear(), toDate.getMonth() + 1, 0).getDate()
+        ) {
+          isMonthFilter = true;
+          year = fromDate.getFullYear();
+          month = fromDate.getMonth() + 1;
+          this.logger.log(`Detected month search pattern 1: ${year}-${month}`);
+        }
+      } else if (searchCriteria.fromVisitDate || searchCriteria.toVisitDate) {
+        // Check if either date suggests a specific month/year pattern
+        const dateStr =
+          searchCriteria.fromVisitDate || searchCriteria.toVisitDate;
+        if (dateStr) {
+          const date = new Date(dateStr);
+
+          // If the date is first or last day of month, assume month filter
+          if (
+            date.getDate() === 1 ||
+            date.getDate() ===
+              new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+          ) {
+            isMonthFilter = true;
+            year = date.getFullYear();
+            month = date.getMonth() + 1;
+            this.logger.log(
+              `Detected month search pattern 2: ${year}-${month} from ${dateStr}`,
+            );
+          }
+        }
+      }
+
+      if (isMonthFilter && year && month) {
+        this.logger.log(`Converting to month filter: ${year}-${month}`);
+        this.logger.log(`testFilterConditions before removal:`, testFilterConditions);
+        this.logger.log(`queryParams before removal:`, JSON.stringify(queryParams, null, 2));
+
+        // Remove any existing date range filters from testFilterConditions
+        // Use while loop to ensure all matching filters are removed
+        let index = testFilterConditions.findIndex((f) => f.includes('f.DateReceived >='));
+        while (index !== -1) {
+          testFilterConditions.splice(index, 1);
+          this.logger.log(`Removed dateFrom filter from testFilterConditions at index ${index}`);
+          index = testFilterConditions.findIndex((f) => f.includes('f.DateReceived >='));
+        }
+
+        index = testFilterConditions.findIndex((f) => f.includes('f.DateReceived <='));
+        while (index !== -1) {
+          testFilterConditions.splice(index, 1);
+          this.logger.log(`Removed dateTo filter from testFilterConditions at index ${index}`);
+          index = testFilterConditions.findIndex((f) => f.includes('f.DateReceived <='));
+        }
+
+        // Clean up date parameters BEFORE adding new ones
+        delete queryParams.dateFrom;
+        delete queryParams.dateTo;
+
+        // Add month/year filters
+        testFilterConditions.push(
+          'toYear(f.DateReceived) = {visitYear:UInt32}',
+        );
+        testFilterConditions.push(
+          'toMonth(f.DateReceived) = {visitMonth:UInt32}',
+        );
+
+        queryParams.visitYear = year;
+        queryParams.visitMonth = month;
+
+        this.logger.log(`testFilterConditions after cleanup:`, testFilterConditions);
+        this.logger.log(
+          `Final queryParams after month conversion:`,
+          JSON.stringify(queryParams, null, 2),
         );
       }
-      if (searchCriteria.maxVisitCount) {
-        havingConditions.push(
-          `countDistinct(f.TestRunKey) <= ${searchCriteria.maxVisitCount}`,
-        );
-      }
-      const havingClause =
-        havingConditions.length > 0
-          ? `HAVING ${havingConditions.join(' AND ')}`
+
+      // citizenID filter will be handled separately in the latest_patient_data CTE
+      // Build filter WHERE clauses AFTER month detection
+      const patientFilters =
+        patientFilterConditions.length > 0
+          ? `AND ${patientFilterConditions.join(' AND ')}`
           : '';
 
-      // Authorized patients derived table for the doctor (any location qualifies)
-      const authorizedPatientsCTE = `
-        SELECT DISTINCT f2.PatientKey
-        FROM default.FactGeneticTestResult f2
-        INNER JOIN default.DimProvider dp2 ON f2.ProviderKey = dp2.ProviderKey
-        WHERE dp2.DoctorId = ${doctorId}
-      `;
+      const testFilters =
+        testFilterConditions.length > 0
+          ? `AND ${testFilterConditions.join(' AND ')}`
+          : '';
 
-      // Build the optimized query - include authorized patients even with zero bdgad visits
-      // QUAN TRỌNG: Chỉ đếm số lần XÉT NGHIỆM (Location = 'bdgad')
-      const query = `
-        WITH authorized_patients AS (
-          ${authorizedPatientsCTE}
+      this.logger.log(`=== Final filter conditions ===`);
+      this.logger.log(`Patient filters: ${patientFilters}`);
+      this.logger.log(`Test filters: ${testFilters}`);
+      this.logger.log(`Query params:`, JSON.stringify(queryParams, null, 2));
+
+      // Use same CTE structure as PatientService for consistency
+      const searchQuery = `
+        WITH latest_patient_data AS (
+          SELECT PatientKey, FullName, DateOfBirth, Gender, Barcode, Address, citizenID,
+                 ROW_NUMBER() OVER (PARTITION BY PatientKey ORDER BY EndDate DESC) as rn
+          FROM DimPatient p
+          WHERE IsCurrent = 1
+          ${searchCriteria.citizenId ? `AND citizenID = {citizenid:String}` : ''}
+          ${patientFilters}
+        ),
+        filtered_tests AS (
+          SELECT DISTINCT
+            f.PatientKey,
+            pr.DoctorName
+          FROM FactGeneticTestResult f
+          JOIN DimProvider pr ON f.ProviderKey = pr.ProviderKey
+          LEFT JOIN DimTest t ON f.TestKey = t.TestKey
+          LEFT JOIN DimDiagnosis d ON f.DiagnosisKey = d.DiagnosisKey
+          WHERE pr.DoctorId = {doctorId:UInt32}
+          ${testFilters}
         )
-        SELECT 
-          p.PatientKey as PatientKey,
-          p.FullName as FullName,
-          p.DateOfBirth as DateOfBirth,
-          p.Gender as Gender,
+        SELECT DISTINCT
+          p.PatientKey as patientKey,
+          p.FullName as fullName,
+          p.DateOfBirth as dateOfBirth,
+          p.Gender as gender,
+          p.Barcode as barcode,
+          p.Address as address,
           p.citizenID as citizenID,
-          p.Address as Address,
-          countDistinct(f.TestRunKey) as VisitCount,
-          MIN(f.DateReceived) as FirstVisitDate,
-          MAX(f.DateReceived) as LastVisitDate
-        FROM default.DimPatient p
-        INNER JOIN authorized_patients ap ON ap.PatientKey = p.PatientKey
-        LEFT JOIN default.FactGeneticTestResult f 
-          ON p.PatientKey = f.PatientKey 
-          ${onClause}
-        ${whereClause}
-        GROUP BY p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, p.citizenID, p.Address
-        ${havingClause}
+          MAX(f_all.DateReceived) as lastTestDate,
+          COUNT(f_all.TestKey) as totalTests,
+          ft.DoctorName as doctorName
+        FROM filtered_tests ft
+        JOIN latest_patient_data p ON ft.PatientKey = p.PatientKey AND p.rn = 1
+        JOIN FactGeneticTestResult f_all ON ft.PatientKey = f_all.PatientKey
+        GROUP BY 
+          p.PatientKey, p.FullName, p.DateOfBirth, p.Gender, 
+          p.Barcode, p.Address, p.citizenID, ft.DoctorName
         ORDER BY p.FullName
-        LIMIT ${limit}
+        LIMIT {limit:UInt32}
       `;
 
-      // Execute the query
-      const result = await this.clickHouseService.query(query);
+      queryParams.limit = finalLimit;
+
+      this.logger.log(`=== Executing query ===`);
+      this.logger.log(`Query:`, searchQuery);
+      this.logger.log(`Params:`, JSON.stringify(queryParams, null, 2));
+
+      // Execute the query using same approach as PatientService
+      const result = await this.clickHouseService.query(
+        searchQuery,
+        queryParams,
+      );
       const patients = result.data || [];
+
+      this.logger.log(`=== Query result ===`);
+      this.logger.log(`Raw result:`, JSON.stringify(result, null, 2));
+      this.logger.log(`Patients found: ${patients.length}`);
+      if (patients.length > 0) {
+        this.logger.log(
+          `First patient sample:`,
+          JSON.stringify(patients[0], null, 2),
+        );
+      }
+
+      // Apply visit count filtering after query if specified (since it's complex to handle in ClickHouse)
+      let filteredPatients = patients;
+      if (searchCriteria.minVisitCount || searchCriteria.maxVisitCount) {
+        this.logger.log(`=== Applying visit count filter ===`);
+        this.logger.log(
+          `Min visits: ${searchCriteria.minVisitCount}, Max visits: ${searchCriteria.maxVisitCount}`,
+        );
+
+        filteredPatients = patients.filter((patient: any) => {
+          const visitCount = patient.totalTests || 0;
+          if (
+            searchCriteria.minVisitCount &&
+            visitCount < searchCriteria.minVisitCount
+          ) {
+            return false;
+          }
+          if (
+            searchCriteria.maxVisitCount &&
+            visitCount > searchCriteria.maxVisitCount
+          ) {
+            return false;
+          }
+          return true;
+        });
+
+        this.logger.log(
+          `After visit count filter: ${filteredPatients.length} patients`,
+        );
+      }
+
+      this.logger.log(`=== Final result ===`);
+      this.logger.log(`Total found: ${filteredPatients.length}`);
+
+      // Format patients data to match FE expected structure
+      const formattedPatients = filteredPatients.map((patient: any) => ({
+        patientKey: patient.patientKey,
+        fullName: patient.fullName,
+        dateOfBirth: patient.dateOfBirth,
+        gender: patient.gender,
+        citizenID: patient.citizenID,
+        address: patient.address,
+        lastTestDate: patient.lastTestDate,
+        totalTests: patient.totalTests,
+      }));
+
+      // Clean searchCriteria to match FE type (remove extra fields)
+      const cleanSearchCriteria = {
+        name: searchCriteria.name,
+        citizenId: searchCriteria.citizenId,
+        gender: searchCriteria.gender,
+        dateOfBirth: searchCriteria.dateOfBirth,
+        limit: searchCriteria.limit,
+      };
 
       return {
         success: true,
         purpose,
         doctorId,
-        searchCriteria,
-        results: patients,
-        totalFound: patients.length,
-        message: `Đã tìm thấy ${patients.length} bệnh nhân phù hợp với tiêu chí tìm kiếm.`,
-        isTotalCount: false,
+        searchCriteria: cleanSearchCriteria,
+        results: formattedPatients,
+        totalFound: filteredPatients.length,
+        message: `Đã tìm thấy ${filteredPatients.length} bệnh nhân phù hợp với tiêu chí tìm kiếm.`,
       };
     } catch (error) {
-      this.logger.error(`Patient search error: ${error.message}`);
+      this.logger.error(`=== Patient search ERROR ===`);
+      this.logger.error(`Error message: ${error.message}`);
+      this.logger.error(`Error stack:`, error.stack);
+
+      // Clean searchCriteria to match FE type even in error case
+      const cleanSearchCriteria = {
+        name: searchCriteria.name,
+        citizenId: searchCriteria.citizenId,
+        gender: searchCriteria.gender,
+        dateOfBirth: searchCriteria.dateOfBirth,
+        limit: searchCriteria.limit,
+      };
+
       return {
         success: false,
         purpose,
         doctorId,
-        searchCriteria,
-        error: error.message,
+        searchCriteria: cleanSearchCriteria,
+        results: [],
+        totalFound: 0,
         message: `Có lỗi xảy ra khi tìm kiếm bệnh nhân. Vui lòng thử lại.`,
-        suggestion: 'Hãy kiểm tra lại tiêu chí tìm kiếm',
       };
     }
   }
