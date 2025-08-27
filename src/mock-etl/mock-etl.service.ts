@@ -70,7 +70,9 @@ export class MockEtlService {
         this.vcfPath.startsWith('s3://') &&
         (this.vcfPath.split('/').length <= 4 || this.vcfPath.endsWith('/'))
       ) {
+        this.logger.log('FastQ URL: ', body.fastq_1_url);
         const index = this.getIndexBasedOnFastQSuffix(body.fastq_1_url);
+        this.logger.log('VCF File: ', VCF_FILES[index]);
         selectedS3Url = `${this.vcfPath}/${VCF_FILES[index]}`;
         this.logger.log(`Selected random VCF: ${selectedS3Url}`);
       }
