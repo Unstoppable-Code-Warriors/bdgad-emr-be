@@ -761,15 +761,19 @@ finally:
     tableName?: string,
   ) {
     try {
-      this.logger.log(`ClickHouse exploration: ${action}`);
+      this.logger.log('[exploreClickHouseSchema] START', { action, tableName });
       const database = 'default'; // Assuming default database for simplicity
       switch (action) {
-        case 'list_tables':
+        case 'list_tables': {
           if (!database) {
             throw new Error('Thiếu thông tin database để tiếp tục khám phá');
           }
           const tablesResult = await this.clickHouseService.query(
             `SHOW TABLES FROM \`${database}\``,
+          );
+          this.logger.log(
+            '[exploreClickHouseSchema] Tables result',
+            tablesResult,
           );
           return {
             success: true,
@@ -778,8 +782,8 @@ finally:
             data: tablesResult.data || tablesResult,
             message: `Đã khám phá được các loại thông tin có sẵn trong hệ thống.`,
           };
-
-        case 'describe_table':
+        }
+        case 'describe_table': {
           if (!database || !tableName) {
             throw new Error(
               'Thiếu thông tin để khám phá cấu trúc dữ liệu chi tiết',
@@ -787,6 +791,10 @@ finally:
           }
           const describeResult = await this.clickHouseService.query(
             `DESCRIBE TABLE \`${database}\`.\`${tableName}\``,
+          );
+          this.logger.log(
+            '[exploreClickHouseSchema] Describe result',
+            describeResult,
           );
           return {
             success: true,
@@ -796,12 +804,13 @@ finally:
             data: describeResult.data || describeResult,
             message: `Đã hiểu được cấu trúc dữ liệu để có thể tìm kiếm chính xác.`,
           };
-
+        }
         default:
+          this.logger.warn('[exploreClickHouseSchema] Unknown action', action);
           throw new Error(`Unknown action: ${action}`);
       }
     } catch (error) {
-      this.logger.error(`ClickHouse exploration error: ${error.message}`);
+      this.logger.error('[exploreClickHouseSchema] ERROR', error);
       return {
         success: false,
         action,
@@ -1100,8 +1109,8 @@ finally:
           p.Barcode as barcode,
           p.Address as address,
           p.citizenID as citizenID,
-          MAX(f_all.DateReceived) as lastTestDate,
-          COUNT(f_all.TestKey) as totalTests,
+          MAXIf(f_all.DateReceived, f_all.Location = 'bdgad') as lastTestDate,
+          COUNTIf(f_all.Location = 'bdgad') as totalTests,
           ft.DoctorName as doctorName
         FROM filtered_tests ft
         JOIN latest_patient_data p ON ft.PatientKey = p.PatientKey AND p.rn = 1
@@ -1234,11 +1243,14 @@ finally:
     doctorId: number,
   ) {
     try {
-      this.logger.log(
-        `Getting patient health records by doctor ${doctorId}: ${purpose}`,
-      );
-
-      // Input already has patientKey resolved from searchPatients
+      this.logger.log('[getPatientHealthRecords] START', {
+        doctorId,
+        patientKey,
+        recordType,
+        countOnly,
+        includeHistory,
+        purpose,
+      });
 
       // Authorize: doctor can see full history if they have at least 1 record with this patient (any location)
       const authQuery = `
@@ -1248,12 +1260,18 @@ finally:
         WHERE f.PatientKey = ${patientKey} AND dp.DoctorId = ${doctorId}
         LIMIT 1
       `;
+      this.logger.log('[getPatientHealthRecords] Auth query', authQuery);
       const authResult = await this.clickHouseService.query(authQuery);
+      this.logger.log('[getPatientHealthRecords] Auth result', authResult);
       const authorizedCount =
         Array.isArray(authResult.data) && authResult.data[0]?.c !== undefined
           ? Number(authResult.data[0].c)
           : 0;
       if (authorizedCount === 0) {
+        this.logger.warn(
+          '[getPatientHealthRecords] Doctor not authorized for patient',
+          { doctorId, patientKey },
+        );
         return {
           success: false,
           purpose,
@@ -1312,12 +1330,19 @@ finally:
           f.TestRunKey, f.Location
         ORDER BY DateReceived DESC
       `;
+      this.logger.log('[getPatientHealthRecords] Main query', query);
 
       // Execute the query
       const result = await this.clickHouseService.query(query);
+      this.logger.log('[getPatientHealthRecords] Query result', result);
       const records = result.data || [];
 
       if (records.length === 0) {
+        this.logger.warn('[getPatientHealthRecords] No records found', {
+          patientKey,
+          doctorId,
+          recordType,
+        });
         return {
           success: false,
           purpose,
@@ -1344,32 +1369,23 @@ finally:
         const cleanEhrData = this.cleanEhrDataForDoctor(ehrData);
 
         return {
-          // Basic patient info
           PatientKey: record.PatientKey,
           FullName: record.FullName,
           DateOfBirth: record.DateOfBirth,
           Gender: record.Gender,
           citizenID: record.citizenID,
           Address: record.Address,
-
-          // Visit info
           VisitDate: record.DateReceived,
           VisitLocation: record.VisitLocation,
           TestName: record.TestName,
           TestCategory: record.TestCategory,
           DiagnosisDescription: record.DiagnosisDescription,
-
-          // Clean EHR data (no file paths)
           ehrData: cleanEhrData,
-
-          // Extract key medical information
           appointmentInfo: cleanEhrData?.appointment || null,
           patientInfo: cleanEhrData?.patient || null,
           medicalRecord: cleanEhrData?.medical_record || null,
           labTests: cleanEhrData?.lab_tests || null,
           prescription: cleanEhrData?.prescription || null,
-
-          // Comments
           commentResult: record.commentResult,
         };
       });
@@ -1386,8 +1402,15 @@ finally:
         firstVisit: records[records.length - 1]?.DateReceived,
         lastVisit: records[0]?.DateReceived,
       };
+      this.logger.log(
+        '[getPatientHealthRecords] Patient summary',
+        patientSummary,
+      );
 
       if (countOnly) {
+        this.logger.log('[getPatientHealthRecords] Count only result', {
+          total: records.length,
+        });
         return {
           success: true,
           purpose,
@@ -1401,6 +1424,10 @@ finally:
         };
       }
 
+      this.logger.log(
+        '[getPatientHealthRecords] Returning full health records',
+        { total: records.length },
+      );
       return {
         success: true,
         purpose,
@@ -1413,7 +1440,7 @@ finally:
         note: 'Thông tin chi tiết hồ sơ y tế đã được làm sạch, loại bỏ link S3 và file path. Chỉ hiển thị thông tin y tế cần thiết cho bác sĩ.',
       };
     } catch (error) {
-      this.logger.error(`Get patient health records error: ${error.message}`);
+      this.logger.error('[getPatientHealthRecords] ERROR', error);
       return {
         success: false,
         purpose,
@@ -1432,11 +1459,13 @@ finally:
     doctorId: number,
   ) {
     try {
-      this.logger.log(`Common query by doctor ${doctorId}: ${purpose}`);
+      this.logger.log('[commonQuery] START', { doctorId, purpose });
+      this.logger.log('[commonQuery] Query', query);
 
       // Validate query is SELECT only
       const trimmedQuery = query.trim().toUpperCase();
       if (!trimmedQuery.startsWith('SELECT')) {
+        this.logger.warn('[commonQuery] Query rejected: not SELECT', query);
         throw new Error(
           'Chỉ được phép thực hiện câu lệnh SELECT trong ClickHouse',
         );
@@ -1461,6 +1490,10 @@ finally:
 
       for (const op of forbiddenOperations) {
         if (trimmedQuery.includes(op)) {
+          this.logger.warn(
+            '[commonQuery] Query rejected: forbidden operation',
+            op,
+          );
           throw new Error(
             `Không được phép sử dụng lệnh ${op} trong ClickHouse`,
           );
@@ -1469,6 +1502,7 @@ finally:
 
       // Execute the query directly - security is enforced through AI prompt
       const result = await this.clickHouseService.query(query);
+      this.logger.log('[commonQuery] Query result', result);
 
       return {
         success: true,
@@ -1480,7 +1514,7 @@ finally:
         message: `Đã thực hiện truy vấn ClickHouse thành công. Mục đích: ${purpose}`,
       };
     } catch (error) {
-      this.logger.error(`ClickHouse query error: ${error.message}`);
+      this.logger.error('[commonQuery] ERROR', error);
       return {
         success: false,
         purpose,
