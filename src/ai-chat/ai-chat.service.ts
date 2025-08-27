@@ -186,7 +186,9 @@ export class AiChatService {
                 .number()
                 .optional()
                 .default(20)
-                .describe('Giới hạn số lượng kết quả (mặc định 20). Khi ĐẾM SỐ LƯỢNG bệnh nhân, phải để limit cao (ít nhất 100) để đảm bảo đếm đủ tất cả bệnh nhân phù hợp.'),
+                .describe(
+                  'Giới hạn số lượng kết quả (mặc định 20). Khi ĐẾM SỐ LƯỢNG bệnh nhân, phải để limit cao (ít nhất 100) để đảm bảo đếm đủ tất cả bệnh nhân phù hợp.',
+                ),
             }),
             purpose: z.string().describe('Mục đích tìm kiếm (để logging)'),
           }),
@@ -844,17 +846,22 @@ finally:
       const offset = 0; // For simplicity, not implementing pagination in AI chat
 
       // Auto-adjust limit for counting purposes
-      const isCountingPurpose = purpose.toLowerCase().includes('đếm') || 
-                               purpose.toLowerCase().includes('bao nhiêu') ||
-                               purpose.toLowerCase().includes('count');
-      
+      const isCountingPurpose =
+        purpose.toLowerCase().includes('đếm') ||
+        purpose.toLowerCase().includes('bao nhiêu') ||
+        purpose.toLowerCase().includes('count');
+
       let finalLimit = limit;
       if (isCountingPurpose && limit < 100) {
         finalLimit = 1000; // Use high limit for accurate counting
-        this.logger.log(`Auto-adjusted limit from ${limit} to ${finalLimit} for counting purpose`);
+        this.logger.log(
+          `Auto-adjusted limit from ${limit} to ${finalLimit} for counting purpose`,
+        );
       }
 
-      this.logger.log(`Final limit: ${finalLimit}, Counting purpose: ${isCountingPurpose}`);
+      this.logger.log(
+        `Final limit: ${finalLimit}, Counting purpose: ${isCountingPurpose}`,
+      );
 
       // Build WHERE conditions for filtering
       const filterConditions: string[] = [];
@@ -985,23 +992,41 @@ finally:
 
       if (isMonthFilter && year && month) {
         this.logger.log(`Converting to month filter: ${year}-${month}`);
-        this.logger.log(`testFilterConditions before removal:`, testFilterConditions);
-        this.logger.log(`queryParams before removal:`, JSON.stringify(queryParams, null, 2));
+        this.logger.log(
+          `testFilterConditions before removal:`,
+          testFilterConditions,
+        );
+        this.logger.log(
+          `queryParams before removal:`,
+          JSON.stringify(queryParams, null, 2),
+        );
 
         // Remove any existing date range filters from testFilterConditions
         // Use while loop to ensure all matching filters are removed
-        let index = testFilterConditions.findIndex((f) => f.includes('f.DateReceived >='));
+        let index = testFilterConditions.findIndex((f) =>
+          f.includes('f.DateReceived >='),
+        );
         while (index !== -1) {
           testFilterConditions.splice(index, 1);
-          this.logger.log(`Removed dateFrom filter from testFilterConditions at index ${index}`);
-          index = testFilterConditions.findIndex((f) => f.includes('f.DateReceived >='));
+          this.logger.log(
+            `Removed dateFrom filter from testFilterConditions at index ${index}`,
+          );
+          index = testFilterConditions.findIndex((f) =>
+            f.includes('f.DateReceived >='),
+          );
         }
 
-        index = testFilterConditions.findIndex((f) => f.includes('f.DateReceived <='));
+        index = testFilterConditions.findIndex((f) =>
+          f.includes('f.DateReceived <='),
+        );
         while (index !== -1) {
           testFilterConditions.splice(index, 1);
-          this.logger.log(`Removed dateTo filter from testFilterConditions at index ${index}`);
-          index = testFilterConditions.findIndex((f) => f.includes('f.DateReceived <='));
+          this.logger.log(
+            `Removed dateTo filter from testFilterConditions at index ${index}`,
+          );
+          index = testFilterConditions.findIndex((f) =>
+            f.includes('f.DateReceived <='),
+          );
         }
 
         // Clean up date parameters BEFORE adding new ones
@@ -1019,7 +1044,10 @@ finally:
         queryParams.visitYear = year;
         queryParams.visitMonth = month;
 
-        this.logger.log(`testFilterConditions after cleanup:`, testFilterConditions);
+        this.logger.log(
+          `testFilterConditions after cleanup:`,
+          testFilterConditions,
+        );
         this.logger.log(
           `Final queryParams after month conversion:`,
           JSON.stringify(queryParams, null, 2),
