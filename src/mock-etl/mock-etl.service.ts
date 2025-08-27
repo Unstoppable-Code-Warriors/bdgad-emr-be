@@ -31,16 +31,31 @@ export class MockEtlService {
   }
 
   private getIndexBasedOnFastQSuffix(fastQUrl: string) {
+    // new fastQUrl format: s3://fastq-file/fastq/15/543221_B.fastq.gz_lI4cPH, handle to catch "B" symbol
     try {
-      const fastQSuffix = fastQUrl
-        .split('/')
-        ?.pop()
-        ?.split('_')
-        .pop()
-        ?.split('.')[0];
+      // Extract filename from URL: s3://fastq-file/fastq/15/543221_B.fastq.gz_lI4cPH -> 543221_B.fastq.gz_lI4cPH
+      const filename = fastQUrl.split('/')?.pop();
+      if (!filename) {
+        return 0;
+      }
+
+      // Extract the part before the first dot: 543221_B.fastq.gz_lI4cPH -> 543221_B
+      const nameWithoutExtension = filename.split('.')[0];
+      if (!nameWithoutExtension) {
+        return 0;
+      }
+
+      // Extract the letter after the first underscore: 543221_B -> B
+      const parts = nameWithoutExtension.split('_');
+      if (parts.length < 2) {
+        return 0;
+      }
+
+      const fastQSuffix = parts[1]; // Get the second part (index 1) which should be the letter
       if (!fastQSuffix) {
         return 0;
       }
+
       switch (fastQSuffix) {
         case 'A':
           return 0;
